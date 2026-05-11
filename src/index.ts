@@ -704,6 +704,29 @@ const swaggerDocument = {
         '500': { description: 'Deletion failed' }
       }
     }
+  },
+
+  '/': {
+    get: {
+      summary: 'Health check',
+      description: 'Returns a simple liveness confirmation that the server is up and running.',
+      tags: ['Health'],
+      responses: {
+        '200': {
+          description: 'Server is running',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  message: { type: 'string', example: 'I am alive!' }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
 }
@@ -713,23 +736,6 @@ const swaggerDocument = {
 
 
 
-/**
- * @swagger
- * /:
- *   get:
- *     summary: Health check endpoint
- *     tags: [Health]
- *     responses:
- *       200:
- *         description: Server is running
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- */
 app.get("/", (_req: Request, res: Response) => {
   res.json({ message: "I am alive!" });
 });
