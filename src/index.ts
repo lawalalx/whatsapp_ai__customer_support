@@ -30,7 +30,7 @@ await warmUpEmbeddingModel().catch(console.error);
 
 
 const PORT = parseInt(process.env.PORT || '3000');
-const URL=  process.env.LOCAL_URL
+const URL=  process.env.REMOTE_URL
 
 app.use(express.json());
 
