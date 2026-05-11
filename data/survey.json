@@ -1,0 +1,129 @@
+{
+  "version": "1.0",
+  "name": "robust_customer_feedback_survey",
+  "states": [
+    {
+      "id": "start",
+      "type": "start",
+      "transitions": [{ "event": "next", "target": "welcome" }]
+    },
+    {
+      "id": "welcome",
+      "type": "screen",
+      "elements": [
+        {
+          "type": "Text",
+          "text": "Welcome to our Customer Feedback Survey! Please answer the following questions."
+        }
+      ],
+      "transitions": [{ "event": "next", "target": "q1" }]
+    },
+    {
+      "id": "q1",
+      "type": "screen",
+      "elements": [
+        {
+          "type": "RadioButtonsGroup",
+          "name": "satisfaction",
+          "required": true,
+          "label": "How satisfied are you with our service?",
+          "data-source": [
+            { "id": "0", "title": "Very satisfied" },
+            { "id": "1", "title": "Satisfied" },
+            { "id": "2", "title": "Neutral" },
+            { "id": "3", "title": "Dissatisfied" },
+            { "id": "4", "title": "Very dissatisfied" }
+          ]
+        }
+      ],
+      "transitions": [{ "event": "next", "target": "q2" }]
+    },
+    {
+      "id": "q2",
+      "type": "screen",
+      "elements": [
+        {
+          "type": "CheckBoxGroup",
+          "name": "improvements",
+          "label": "What areas can we improve? (Select all that apply)",
+          "data-source": [
+            { "id": "0", "title": "Product quality" },
+            { "id": "1", "title": "Customer support" },
+            { "id": "2", "title": "Delivery speed" },
+            { "id": "3", "title": "Pricing" },
+            { "id": "4", "title": "Other" }
+          ]
+        }
+      ],
+      "transitions": [{ "event": "next", "target": "q3" }]
+    },
+    {
+      "id": "q3",
+      "type": "screen",
+      "elements": [
+        {
+          "type": "Input",
+          "name": "other_feedback",
+          "label": "Please provide any additional feedback:",
+          "input-type": "text",
+          "placeholder": "Type your feedback here...",
+          "max-length": 200
+        }
+      ],
+      "transitions": [{ "event": "next", "target": "q4" }]
+    },
+    {
+      "id": "q4",
+      "type": "screen",
+      "elements": [
+        {
+          "type": "ButtonGroup",
+          "name": "used_again",
+          "label": "Would you use our service again?",
+          "buttons": [
+            { "id": "yes", "title": "Yes" },
+            { "id": "no", "title": "No" }
+          ]
+        }
+      ],
+      "transitions": [{ "event": "next", "target": "q5" }]
+    },
+    {
+      "id": "q5",
+      "type": "screen",
+      "elements": [
+        {
+          "type": "ButtonGroup",
+          "name": "recommend",
+          "label": "Would you recommend us to a friend?",
+          "buttons": [
+            { "id": "yes", "title": "Yes" },
+            { "id": "no", "title": "No" }
+          ]
+        }
+      ],
+      "transitions": [{ "event": "next", "target": "submit" }]
+    },
+    {
+      "id": "submit",
+      "type": "screen",
+      "elements": [
+        {
+          "type": "Button",
+          "name": "complete",
+          "label": "Submit Survey",
+          "on-click-action": {
+            "name": "complete",
+            "payload": {
+              "satisfaction": "${form.satisfaction}",
+              "improvements": "${form.improvements}",
+              "other_feedback": "${form.other_feedback}",
+              "used_again": "${form.used_again}",
+              "recommend": "${form.recommend}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
