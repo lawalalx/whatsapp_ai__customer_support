@@ -4,7 +4,7 @@ Welcome to your new [Mastra](https://mastra.ai/) project! We're excited to see w
 
 ## Getting Started
 
-Start the development server:
+Start the development server..:
 
 ```shell
 pnpm run dev
