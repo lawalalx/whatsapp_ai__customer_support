@@ -1,6 +1,6 @@
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
-import pool from "../../db";
+import pool from "../../db/index.js";
 
 
 

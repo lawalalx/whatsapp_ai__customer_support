@@ -1,6 +1,6 @@
-import { SendSurveyQuestionParams } from "../flow.types"
-import { sendWhatsAppList, sendWhatsAppMessage, sendWhatsAppSurvey, sendWhatsAppTemplate, sendWhatsAppTyping } from "../whatsapp-client"
-import { setLastOutbound } from './outboundTracker'
+import { SendSurveyQuestionParams } from "../flow.types.js"
+import { sendWhatsAppList, sendWhatsAppMessage, sendWhatsAppSurvey, sendWhatsAppTemplate, sendWhatsAppTyping } from "../whatsapp-client.js"
+import { setLastOutbound } from './outboundTracker.js'
 
 
 
@@ -60,7 +60,7 @@ export async function sendSurveyQuestion({
         setLastOutbound(to, 'survey_question');
 
         // send typing indicator before survey message
-        try { sendWhatsAppTyping({ to }).catch(() => {}); } catch (e) {}
+        try { sendWhatsAppTyping({ to, messageId: `${session.id}_q${index + 1}` }).catch(() => {}); } catch (e) {}
 
         if (useButtons) {
             return sendWhatsAppSurvey({
@@ -92,7 +92,7 @@ export async function sendSurveyQuestion({
     // TEXT (FIXED)
     // mark outbound
     setLastOutbound(to, 'survey_question');
-    try { sendWhatsAppTyping({ to }).catch(() => {}); } catch (e) {}
+    try { sendWhatsAppTyping({ to, messageId: `${session.id}_q${index + 1}` }).catch(() => {}); } catch (e) {}
     return sendWhatsAppMessage({
         to,
         message: `${qText}\n\n${footerText}\n(Reply with your answer)`,

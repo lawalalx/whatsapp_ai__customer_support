@@ -1,7 +1,7 @@
 import express from "express";
 import fs from "fs-extra";
-import { getAllDocs, getDocById, deleteDocRecord } from "../db";
-import { safeDeleteByDocId } from "../process-and-store";
+import { getAllDocs, getDocById, deleteDocRecord } from "../db.js";
+import { safeDeleteByDocId } from "../process-and-store.js";
 
 const router = express.Router();
 

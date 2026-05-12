@@ -1,13 +1,13 @@
 // webhook/router.ts
 import { Pool } from 'pg';
-import { handleChatMessage } from "../handlers/chat.handler";
-import { handleSurveyMessage } from "../handlers/survey.handler";
-import { getActiveSurveySession } from "../services/session.service";
+import { handleChatMessage } from "../handlers/chat.handler.js";
+import { handleSurveyMessage } from "../handlers/survey.handler.js";
+import { getActiveSurveySession } from "../services/session.service.js";
 
 
 import { Mastra } from '@mastra/core';
-import { normalizePhone } from '../utils/format_phone';
-import { sendSurveyQuestion } from '../utils/survey.sender';
+import { normalizePhone } from '../utils/format_phone.js';
+import { sendSurveyQuestion } from '../utils/survey.sender.js';
 
 // Simple in-memory name store for fallback when webhook doesn't provide contact name.
 // NOTE: This is process-local. For production persist to DB or agent memory store.

@@ -1,6 +1,6 @@
 // services/response.service.ts
 
-import { SaveSurveyResponseParams } from "../flow.types";
+import { SaveSurveyResponseParams } from "../flow.types.js";
 
 export async function saveSurveyResponse({
   db,

@@ -2,8 +2,8 @@ import "dotenv/config";
 
 import { Agent } from '@mastra/core/agent'
 import { Memory } from '@mastra/memory'
-import { getChatModel } from "../core/llm/provider";
-import { sharedPgStore } from "../core/db/shared-pg-store";
+import { getChatModel } from "../core/llm/provider.js";
+import { sharedPgStore } from "../core/db/shared-pg-store.js";
 
 export const surveyAgent = new Agent({
   id: 'survey-agent',

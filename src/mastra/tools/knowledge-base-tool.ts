@@ -1,6 +1,6 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { retrieveContext } from "../core/rag/retrieve";
+import { retrieveContext } from "../core/rag/retrieve.js";
 
 /**
  * Knowledge base retrieval tool for the Engagement Agent.

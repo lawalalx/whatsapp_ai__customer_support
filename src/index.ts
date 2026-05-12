@@ -7,21 +7,21 @@ import { z } from 'zod';
 import swaggerUi from 'swagger-ui-express';
 import express, { Application, Request, Response } from 'express';
 import { MastraServer } from '@mastra/express';
-import { mastra } from './mastra';
+import { mastra } from './mastra/index.js';
 
-import { sendWhatsAppMessage, sendWhatsAppSurvey, sendWhatsAppReadReceipt } from './whatsapp-client';
-import { lastOutboundType, setLastOutbound } from './utils/outboundTracker';
-import escalationService from './services/escalation-service';
-import { initDatabase } from './db-init';
+import { sendWhatsAppMessage, sendWhatsAppSurvey, sendWhatsAppReadReceipt } from './whatsapp-client.js';
+import { lastOutboundType, setLastOutbound } from './utils/outboundTracker.js';
+import escalationService from './services/escalation-service.js';
+import { initDatabase } from './db-init.js';
 // WhatsApp Webhook: Handle incoming messages
-import { routeIncomingMessage } from './webhook/router';
+import { routeIncomingMessage } from './webhook/router.js';
 
 // RAG / Knowledge Base
-import kbUploadRoute from './mastra/core/rag/routes/upload.route';
-import kbDocsRoute from './mastra/core/rag/routes/docs.route';
-import { createKbDocsTable } from './mastra/core/rag/db';
-import { initVectorIndex } from './mastra/core/rag/vector-store';
-import { warmUpEmbeddingModel } from "./mastra/core/llm/provider";
+import kbUploadRoute from './mastra/core/rag/routes/upload.route.js';
+import kbDocsRoute from './mastra/core/rag/routes/docs.route.js';
+import { createKbDocsTable } from './mastra/core/rag/db.js';
+import { initVectorIndex } from './mastra/core/rag/vector-store.js';
+import { warmUpEmbeddingModel } from "./mastra/core/llm/provider.js";
 
 
 const app: Application = express();
@@ -29,7 +29,16 @@ const app: Application = express();
 await warmUpEmbeddingModel().catch(console.error);
 
 
-const PORT = parseInt(process.env.PORT || '3000');
+const args = process.argv;
+
+const portIndex = args.indexOf("--port");
+
+const PORT =
+  portIndex !== -1 && args[portIndex + 1]
+    ? Number(args[portIndex + 1])
+    : Number(process.env.PORT || 3000);
+
+
 const URL=  process.env.REMOTE_URL
 
 app.use(express.json());
@@ -57,8 +66,8 @@ app.post('/api/agent/chat', async (req: Request, res: Response) => {
     const response = await agent.generate(messages, {
       memory: { thread: `thread_${threadPhone}`, resource: threadPhone },
     });
-    
-    console.log("\n\nAgent response for chat test:\n", response);
+
+    // setLastOutbound(threadPhone, 'engagementAgent');
 
     return res.json({ success: true, reply: response?.text?.trim() ?? '' });
   } catch (err: any) {
@@ -1233,7 +1242,7 @@ async function startServer() {
 
     // const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
     app.listen(PORT, () => {
-      console.log(`Server is running at ${URL}`);
+      console.log(`Server is listening at ${PORT} and running at ${URL}`);
     });
   } catch (error) {
     console.error('Error starting server:', error);

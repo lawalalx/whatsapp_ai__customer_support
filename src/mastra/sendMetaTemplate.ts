@@ -1,5 +1,5 @@
-import { sendWhatsAppTemplate } from '../whatsapp-client';
-import { metaSurveyTemplates } from './metaSurveyTemplates';
+import { sendWhatsAppTemplate } from '../whatsapp-client.js';
+import { metaSurveyTemplates } from './metaSurveyTemplates.js';
 
 /**
  * Sends a Meta WhatsApp survey template to a user.

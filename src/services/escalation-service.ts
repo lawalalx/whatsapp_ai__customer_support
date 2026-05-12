@@ -1,4 +1,4 @@
-import { sendWhatsAppMessage as sendWA } from '../whatsapp-client';
+import { sendWhatsAppMessage as sendWA } from '../whatsapp-client.js';
 
 export async function getEscalations(db: any, status?: string) {
   if (status) {

@@ -1,8 +1,8 @@
 import { embed } from "ai";
 import { MastraAgentRelevanceScorer, rerankWithScorer } from "@mastra/rag";
 
-import { vectorStore, INDEX_NAME } from "./vector-store";
-import { getChatModel, getEmbeddingModel } from "../llm/provider";
+import { vectorStore, INDEX_NAME } from "./vector-store.js";
+import { getChatModel, getEmbeddingModel } from "../llm/provider.js";
 
 /**
  * Embeds `query`, retrieves the top-K vector matches, then reranks for relevance.

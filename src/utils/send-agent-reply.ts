@@ -11,8 +11,8 @@
  * with no tag are sent as normal text messages.
  */
 
-import { normalizePhone } from './format_phone';
-import { sendWhatsAppMessage, sendWhatsAppList } from '../whatsapp-client';
+import { normalizePhone } from './format_phone.js';
+import { sendWhatsAppMessage, sendWhatsAppList } from '../whatsapp-client.js';
 
 export interface AgentReplyOption {
   id: string;

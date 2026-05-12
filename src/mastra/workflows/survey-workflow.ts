@@ -2,9 +2,9 @@ import "dotenv/config";
 
 import { createStep, createWorkflow } from '@mastra/core/workflows'
 import { z } from 'zod'
-import { surveyTemplates } from '../../surveyTemplates'
-import { normalizePhone } from "../../utils/format_phone";
-import { sendSurveyQuestion } from "../../utils/survey.sender";
+import { surveyTemplates } from '../../surveyTemplates.js'
+import { normalizePhone } from "../../utils/format_phone.js";
+import { sendSurveyQuestion } from "../../utils/survey.sender.js";
 
 // ─── Step 1: Generate survey content using the Survey Agent ──────────────────
 

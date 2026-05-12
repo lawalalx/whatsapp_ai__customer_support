@@ -3,9 +3,9 @@ import crypto from "crypto";
 import { MDocument } from "@mastra/rag";
 import { embedMany } from "ai";
 
-import { vectorStore, INDEX_NAME } from "./vector-store";
-import { extractText } from "./ingest-files";
-import { getEmbeddingModel } from "../llm/provider";
+import { vectorStore, INDEX_NAME } from "./vector-store.js";
+import { extractText } from "./ingest-files.js";
+import { getEmbeddingModel } from "../llm/provider.js";
 
 type ProcessInput = {
   filePath: string;

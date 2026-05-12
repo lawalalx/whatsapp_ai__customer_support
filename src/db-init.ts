@@ -4,7 +4,7 @@
 //
 // Mastra auto-creates its own tables (threads, messages, traces, etc.)
 // but we need custom tables for survey tracking.
-import pool from "./db";
+import pool from "./db/index.js";
 
 export const initDatabase = async () => {
 

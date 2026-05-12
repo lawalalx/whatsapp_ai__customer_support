@@ -1,7 +1,7 @@
 // webhook/handlers/chat.handler.ts
 
-import { sendWhatsAppTyping } from '../whatsapp-client';
-import { sendAgentReply } from '../utils/send-agent-reply';
+import { sendWhatsAppTyping } from '../whatsapp-client.js';
+import { sendAgentReply } from '../utils/send-agent-reply.js';
 
 export async function handleChatMessage({
   mastra,

@@ -2,33 +2,41 @@ import "dotenv/config";
 import { Mastra } from "@mastra/core/mastra";
 import { registerApiRoute } from "@mastra/core/server";
 import { PinoLogger } from "@mastra/loggers";
-import { sharedPgStore } from "./core/db/shared-pg-store";
+import { sharedPgStore } from "./core/db/shared-pg-store.js";
 
 // Workflows & Agents
-import { surveyWorkflow } from "./workflows/survey-workflow";
-import { surveyAgent } from "./agents/survey-agent";
-import { engagementAgent } from "./agents/engagement-agent";
+import { surveyWorkflow } from "./workflows/survey-workflow.js";
+import { surveyAgent } from "./agents/survey-agent.js";
+import { engagementAgent } from "./agents/engagement-agent.js";
 
 // Tools
 import {
   escalateTool,
-  sendWhatsAppMessageTool,
-  sendWhatsAppSurveyTool,
-  sendWhatsAppTemplateTool,
-} from "./tools";
+} from "./tools/escalate-to-human.js";
+import {
+    sendWhatsAppMessageTool,
+} from "./tools/send-whatsapp-message-tool.js";
+import {
+    sendWhatsAppSurveyTool,
+ 
+} from "./tools/send-whatsapp-survey-tool.js"
+
+import {
+   sendWhatsAppTemplateTool,
+} from "./tools/send-whatsapp-template-tool.js"
 
 // Meta Flow APIs
 import {
   createMetaFlow,
   uploadFlowJson,
   publishFlow,
-} from "./metaFlowApi";
+} from "./metaFlowApi.js";
 
 // WhatsApp client
 import {
   sendWhatsAppMessage,
   markAsRead,
-} from "../whatsapp-client";
+} from "../whatsapp-client.js";
 
 /* -------------------------------------------------------------------------- */
 /*                                CONFIG                                      */
@@ -71,7 +79,7 @@ const routes = [
         if (mode === 'meta') {
           // Send Meta WhatsApp survey template (no workflow)
           // Use sendMetaTemplate helper
-          const { sendMetaTemplate } = await import("./sendMetaTemplate");
+          const { sendMetaTemplate } = await import("./sendMetaTemplate.js");
           const metaResult = await sendMetaTemplate({ to, surveyId, topic });
           return c.json({ success: true, mode: 'meta', metaResult });
         }
@@ -120,7 +128,7 @@ const routes = [
             // Respect meta mode: send template directly
             const mode = customerMode || body.mode;
             if (mode === 'meta') {
-              const { sendMetaTemplate } = await import("./sendMetaTemplate");
+              const { sendMetaTemplate } = await import("./sendMetaTemplate.js");
               const metaResult = await sendMetaTemplate({ to, surveyId: body.surveyId, topic: body.topic });
               return { to, success: true, mode: 'meta', metaResult };
             }

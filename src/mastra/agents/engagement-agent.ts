@@ -3,10 +3,10 @@ import "dotenv/config";
 import { Agent } from '@mastra/core/agent'
 import { LanguageDetector } from '@mastra/core/processors'
 import { Memory } from '@mastra/memory'
-import { deleteEscalationTool, escalateTool } from "../tools/escalate-to-human";
-import { knowledgeBaseTool } from "../tools/knowledge-base-tool";
-import { getChatModel } from "../core/llm/provider";
-import { sharedPgStore } from "../core/db/shared-pg-store";
+import { deleteEscalationTool, escalateTool } from "../tools/escalate-to-human.js";
+import { knowledgeBaseTool } from "../tools/knowledge-base-tool.js";
+import { getChatModel } from "../core/llm/provider.js";
+import { sharedPgStore } from "../core/db/shared-pg-store.js";
 import { TokenLimiterProcessor } from '@mastra/core/processors'
 
 
@@ -351,8 +351,7 @@ export const engagementAgent = new Agent({
   // preventing unbounded memory growth for long-running conversations.
   memory: new Memory({ storage: sharedPgStore, options: { lastMessages: 15 } }),
 
-  defaultOptions: {
-    autoResumeSuspendedTools: true,
-  },
-
+  // defaultOptions: {
+  //   autoResumeSuspendedTools: true,
+  // },
 })

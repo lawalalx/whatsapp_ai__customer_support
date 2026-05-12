@@ -2,8 +2,8 @@ import express from "express";
 import multer from "multer";
 import fs from "fs-extra";
 import { v4 as uuidv4 } from "uuid";
-import { processAndStore } from "../process-and-store";
-import { insertDoc } from "../db";
+import { processAndStore } from "../process-and-store.js";
+import { insertDoc } from "../db.js";
 
 const router = express.Router();
 

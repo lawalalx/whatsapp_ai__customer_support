@@ -1,8 +1,8 @@
 // handlers/survey.handler.ts
 
 import { Pool } from "pg";
-import { saveSurveyResponse } from "../services/response.service";
-import { completeSession, updateSessionProgress } from "../services/session.service";
+import { saveSurveyResponse } from "../services/response.service.js";
+import { completeSession, updateSessionProgress } from "../services/session.service.js";
 
 
 type HandleSurveyMessageParams = {

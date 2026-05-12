@@ -2,8 +2,8 @@
 // Supports: text messages, interactive button surveys, template messages,
 // and list messages for multi-option surveys.
 import "dotenv/config";
-import { SendSurveyParams } from "./flow.types";
-import { normalizePhone } from './utils/format_phone';
+import { SendSurveyParams } from "./flow.types.js";
+import { normalizePhone } from './utils/format_phone.js';
 
 const getConfig = () => {
   const apiVersion = process.env.WHATSAPP_API_VERSION || 'v22.0';
