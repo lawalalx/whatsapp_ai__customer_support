@@ -73,7 +73,7 @@ console.log('DB URL from Express Server', process.env.DATABASE_URL);
 const swaggerDocument = {
   openapi: '3.0.0',
   info: {
-    title: 'Senegal Survey API',
+    title: 'Senegal Survey and Whatsapp AI Agent API',
     version: '1.0.0',
     description: 'API docs for webhook and admin survey endpoints',
   },
@@ -144,10 +144,13 @@ const swaggerDocument = {
       description: `
       Triggers a Mastra workflow to send a survey via WhatsApp.
 
-      Supports multiple modes:
-      - ai: AI-generated questions dynamically created at runtime
-      - manual: Uses predefined survey templates
-      - meta: Uses approved WhatsApp message templates
+      **Supported modes** (required — choose one):
+
+      | Mode | Description |
+      |------|-------------|
+      | \`ai\` | AI-generated questions dynamically created at runtime based on the topic and context |
+      | \`manual\` | Uses predefined survey templates stored in the system |
+      | \`meta\` | Uses approved WhatsApp Business message templates (outside the 24-hour window) |
 
       The workflow manages:
       - Question sequencing
@@ -166,10 +169,28 @@ const swaggerDocument = {
                 to: { type: 'string', description: 'Customer phone number (E.164 format)' },
                 surveyId: { type: 'string' },
                 topic: { type: 'string' },
-                mode: { type: 'string', enum: ['ai', 'manual', 'meta'] },
+                mode: {
+                  type: 'string',
+                  enum: ['ai', 'manual', 'meta'],
+                  description: '**ai** — AI-generated questions | **manual** — predefined template | **meta** — approved WhatsApp template'
+                },
                 context: { type: 'string', description: 'Optional AI context for personalization' }
               },
               required: ['to', 'surveyId', 'topic', 'mode']
+            },
+            examples: {
+              ai_mode: {
+                summary: 'AI mode — dynamic question generation',
+                value: { to: '2348123456789', surveyId: 'sat-001', topic: 'Customer Satisfaction', mode: 'ai', context: 'Premium tier customer' }
+              },
+              manual_mode: {
+                summary: 'Manual mode — predefined template',
+                value: { to: '2348123456789', surveyId: 'nps-template-001', topic: 'NPS Survey', mode: 'manual' }
+              },
+              meta_mode: {
+                summary: 'Meta mode — approved WhatsApp template',
+                value: { to: '2348123456789', surveyId: 'meta-onboarding', topic: 'Onboarding Feedback', mode: 'meta' }
+              }
             }
           }
         }
@@ -191,6 +212,14 @@ const swaggerDocument = {
     Each phone number in the \`customers\` array represents a unique recipient. 
     A separate workflow execution is started per recipient, enabling parallel processing 
     and consistent delivery at scale.
+
+    **Supported modes** (required — choose one):
+
+    | Mode | Description |
+    |------|-------------|
+    | \`ai\` | AI-generated questions dynamically created at runtime based on the topic and context |
+    | \`manual\` | Uses predefined survey templates stored in the system |
+    | \`meta\` | Uses approved WhatsApp Business message templates (outside the 24-hour window) |
 
     Top-level fields (\`surveyId\`, \`topic\`, \`mode\`, \`context\`) are applied globally 
     to all recipients.
@@ -222,7 +251,7 @@ const swaggerDocument = {
               mode: { 
                 type: 'string', 
                 enum: ['ai', 'manual', 'meta'],
-                description: 'Survey mode: AI-generated, manual template, or Meta template'
+                description: '**ai** — AI-generated questions | **manual** — predefined template | **meta** — approved WhatsApp template'
               },
               context: { 
                 type: 'string',
@@ -237,16 +266,34 @@ const swaggerDocument = {
                 }
               }
             },
-            required: ['customers']
+            required: ['customers', 'mode']
           },
           examples: {
-            bulk_send_example: {
-              summary: 'Bulk survey request',
+            bulk_ai_mode: {
+              summary: 'Bulk — AI mode',
               value: {
                 surveyId: 'customer-sat-001',
                 topic: 'Customer Satisfaction',
                 mode: 'ai',
                 context: 'Premium users campaign',
+                customers: ['2348123456789', '2348012345678']
+              }
+            },
+            bulk_manual_mode: {
+              summary: 'Bulk — Manual mode',
+              value: {
+                surveyId: 'nps-template-001',
+                topic: 'NPS Survey',
+                mode: 'manual',
+                customers: ['2348123456789', '2348012345678']
+              }
+            },
+            bulk_meta_mode: {
+              summary: 'Bulk — Meta mode',
+              value: {
+                surveyId: 'meta-onboarding',
+                topic: 'Onboarding Feedback',
+                mode: 'meta',
                 customers: ['2348123456789', '2348012345678']
               }
             }
@@ -287,12 +334,47 @@ const swaggerDocument = {
       description: `
       Fetches stored survey responses from the database.
 
-      Supports filtering by surveyId (optional).
+      Supports optional filtering by:
+      - **surveyId**: Filter responses belonging to a specific survey
+      - **customerNumber**: Filter responses for a specific customer (phone number)
+      - **surveySessionId**: Filter responses from a specific survey session
+      - **surveyed**: \`true\` returns only responses where the session is completed; \`false\` returns responses from active or abandoned sessions
+
       Used for:
       - Analytics dashboards
       - Reporting
       - Data export
       `,
+      parameters: [
+        {
+          name: 'surveyId',
+          in: 'query',
+          required: false,
+          description: 'Filter by survey ID',
+          schema: { type: 'string' }
+        },
+        {
+          name: 'customerNumber',
+          in: 'query',
+          required: false,
+          description: 'Filter by customer phone number (E.164 format without +, e.g. 2348123456789)',
+          schema: { type: 'string', example: '2348123456789' }
+        },
+        {
+          name: 'surveySessionId',
+          in: 'query',
+          required: false,
+          description: 'Filter by a specific survey session ID',
+          schema: { type: 'string' }
+        },
+        {
+          name: 'surveyed',
+          in: 'query',
+          required: false,
+          description: '`true` — only responses from completed sessions; `false` — responses from active or abandoned sessions',
+          schema: { type: 'string', enum: ['true', 'false'] }
+        }
+      ],
       responses: {
         '200': { description: 'Survey responses retrieved successfully' }
       }

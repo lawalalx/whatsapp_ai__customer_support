@@ -170,23 +170,49 @@ const routes = [
   registerApiRoute("api/crm/survey-responses", {
     method: "GET",
     handler: async (c) => {
-      const surveyId = c.req.query("surveyId");
+      const surveyId        = c.req.query("surveyId");
+      const customerNumber  = c.req.query("customerNumber");
+      const surveySessionId = c.req.query("surveySessionId");
+      const surveyedParam   = c.req.query("surveyed"); // 'true' | 'false'
 
       try {
         const db = getDb();
         if (!db) throw new Error("DB not available");
 
-        const query = surveyId
-          ? {
-              text: "SELECT * FROM survey_responses WHERE survey_id=$1 ORDER BY created_at DESC",
-              values: [surveyId],
-            }
-          : {
-              text: "SELECT * FROM survey_responses ORDER BY created_at DESC",
-              values: [],
-            };
+        const conditions: string[] = [];
+        const values: any[]        = [];
 
-        const rows = await db.any(query.text, query.values);
+        if (surveyId) {
+          values.push(surveyId);
+          conditions.push(`r.survey_id = $${values.length}`);
+        }
+        if (customerNumber) {
+          values.push(customerNumber);
+          conditions.push(`r.customer_phone = $${values.length}`);
+        }
+        if (surveySessionId) {
+          values.push(surveySessionId);
+          conditions.push(`r.session_id = $${values.length}`);
+        }
+
+        const filterBySurveyed = surveyedParam === "true" || surveyedParam === "false";
+
+        let sql: string;
+        if (filterBySurveyed) {
+          // Join sessions so we can filter on completion status
+          const statusClause =
+            surveyedParam === "true"
+              ? `s.status = 'completed'`
+              : `s.status != 'completed'`;
+          conditions.push(statusClause);
+          const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+          sql = `SELECT r.* FROM survey_responses r JOIN survey_sessions s ON s.id = r.session_id ${where} ORDER BY r.created_at DESC`;
+        } else {
+          const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+          sql = `SELECT r.* FROM survey_responses r ${where} ORDER BY r.created_at DESC`;
+        }
+
+        const rows = await db.any(sql, values);
         return c.json({ responses: rows });
 
       } catch {
