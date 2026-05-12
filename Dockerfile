@@ -5,24 +5,19 @@ FROM node:22-bullseye-slim AS builder
 
 WORKDIR /app
 
-# Enable pnpm
 RUN corepack enable && corepack prepare pnpm@10.5.2 --activate
 
-# Copy dependency files first (better Docker cache)
 COPY package.json pnpm-lock.yaml ./
 
-# Install all deps (including dev deps for TypeScript build)
 RUN pnpm install --frozen-lockfile
 
-# Copy source
 COPY . .
 
-# Build TypeScript
 RUN pnpm build
 
 
 # =========================
-# PRODUCTION STAGE
+# PRODUCTION
 # =========================
 FROM node:22-bullseye-slim AS runner
 
@@ -30,25 +25,21 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Enable pnpm
 RUN corepack enable && corepack prepare pnpm@10.5.2 --activate
 
-# Copy package files
 COPY package.json pnpm-lock.yaml ./
 
-# Install ONLY production dependencies
 RUN pnpm install --prod --frozen-lockfile
 
-# Copy built app only
 COPY --from=builder /app/dist ./dist
-
-# Optional:
-# COPY --from=builder /app/uploads ./uploads
-# COPY --from=builder /app/workspace ./workspace
 
 EXPOSE 3000
 
 CMD ["node", "dist/index.js"]
+
+
+
+
 
 
 # # Start from official Node.js LTS image
