@@ -33,6 +33,7 @@ export async function notifyAndMaybeUpdate(params: NotifyParams) {
     const allowed = ['pending', 'completed'];
     if (!allowed.includes(ticketStatus)) throw new Error('Invalid ticketStatus');
     const updated = await updateTicketStatus(db, ticketId, ticketStatus);
+    if (!updated) throw new Error('not_found');
     if (!to && updated && updated.customer_phone) to = updated.customer_phone;
   }
 

@@ -9,6 +9,7 @@ import express, { Application, Request, Response } from 'express';
 import { MastraServer } from '@mastra/express';
 import { mastra } from './mastra/index.js';
 
+import { normalizePhone } from './utils/format_phone.js';
 import { sendWhatsAppMessage, sendWhatsAppSurvey, sendWhatsAppReadReceipt } from './whatsapp-client.js';
 import { lastOutboundType, setLastOutbound } from './utils/outboundTracker.js';
 import escalationService from './services/escalation-service.js';
@@ -22,6 +23,26 @@ import kbDocsRoute from './mastra/core/rag/routes/docs.route.js';
 import { createKbDocsTable } from './mastra/core/rag/db.js';
 import { initVectorIndex } from './mastra/core/rag/vector-store.js';
 import { warmUpEmbeddingModel } from "./mastra/core/llm/provider.js";
+
+const seenInboundMessageIds = new Map<string, number>();
+const SEEN_INBOUND_TTL_MS = 10 * 60 * 1000;
+
+function isDuplicateInboundMessage(messageId: string): boolean {
+  const now = Date.now();
+
+  for (const [id, timestamp] of seenInboundMessageIds) {
+    if (now - timestamp > SEEN_INBOUND_TTL_MS) {
+      seenInboundMessageIds.delete(id);
+    }
+  }
+
+  if (seenInboundMessageIds.has(messageId)) {
+    return true;
+  }
+
+  seenInboundMessageIds.set(messageId, now);
+  return false;
+}
 
 
 const app: Application = express();
@@ -39,7 +60,7 @@ const PORT =
     : Number(process.env.PORT || 3000);
 
 
-const URL=  process.env.REMOTE_URL
+const URL=  process.env.LOCAL_URL
 
 app.use(express.json());
 
@@ -57,6 +78,12 @@ app.post('/api/agent/chat', async (req: Request, res: Response) => {
     const threadPhone = phone?.trim() || 'test-user';
     const agent = mastra.getAgent('engagementAgent');
     const messages: any[] = [];
+    const normalizedPhone = normalizePhone(threadPhone);
+
+    messages.push({
+      role: 'system',
+      content: `Customer WhatsApp phone: ${normalizedPhone}. This is the customer's current WhatsApp number. You DO have access to this number. If the customer says "use the one you have", "use this number", or similar during escalation, treat this WhatsApp number as the provided contact number and only ask them to confirm whether it is the number linked to their FBNBank account. Do not say you do not have access to their phone number.`,
+    });
 
     if (contactName) {
       messages.push({ role: 'system', content: `Customer name: ${contactName}. Address the customer by this name when appropriate.` });
@@ -641,7 +668,7 @@ const swaggerDocument = {
       responses: {
         '200': { description: 'Escalation resolved successfully' },
         '400': { description: 'Invalid request' },
-        '404': { description: 'Escalation not found' },
+        '404': { description: 'Escalation not found. Probably deleted' },
         '500': { description: 'Failed to resolve escalation' }
       }
     }
@@ -666,7 +693,7 @@ const swaggerDocument = {
       ],
       responses: {
         '200': { description: 'Escalation deleted successfully' },
-        '404': { description: 'Escalation not found' },
+        '404': { description: 'The escalation with this ID is not found. Probably deleted' },
         '500': { description: 'Failed to delete escalation' }
       }
     }
@@ -871,9 +898,11 @@ app.post('/webhook', async (req: Request, res: Response) => {
       return res.sendStatus(200);
     }
 
-    const message = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    const changeValue = body?.entry?.[0]?.changes?.[0]?.value;
+    const message = changeValue?.messages?.[0];
     // Try to extract the contact/profile name from the Meta webhook payload
-    const contacts = body?.entry?.[0]?.changes?.[0]?.value?.contacts;
+    const contacts = changeValue?.contacts;
+    const phoneNumberId: string | undefined = changeValue?.metadata?.phone_number_id || undefined;
     const contactName = Array.isArray(contacts) && contacts.length > 0
       ? (contacts[0]?.profile?.name || contacts[0]?.name || contacts[0]?.pushname || null)
       : null;
@@ -885,12 +914,17 @@ app.post('/webhook', async (req: Request, res: Response) => {
     const from = message.from;
     const messageId: string = message.id || '';
 
+    if (messageId && isDuplicateInboundMessage(messageId)) {
+      console.log(`↩️ Skipping duplicate inbound message ${messageId}`);
+      return res.sendStatus(200);
+    }
+
     console.log(`📩 Incoming message from ${from}`);
     console.log(JSON.stringify(message, null, 2));
 
     // Mark the incoming message as read immediately (turns grey ticks blue)
     if (messageId) {
-      sendWhatsAppReadReceipt({ messageId }).catch(() => {});
+      sendWhatsAppReadReceipt({ messageId, phoneNumberId }).catch(() => {});
     }
 
     //  Get DB + mastra
@@ -909,12 +943,13 @@ app.post('/webhook', async (req: Request, res: Response) => {
       phone: from,
       contactName,
       messageId,
+      phoneNumberId,
       lastOutboundType,
 
       sendMessage: async (to: string, msg: string) => {
         // mark last outbound as chat
         setLastOutbound(String(to), 'chat');
-        await sendWhatsAppMessage({ to, message: msg });
+        await sendWhatsAppMessage({ to, message: msg, phoneNumberId });
       },
 
       sendQuestion: async (to: string, question: any, session: any) => {
@@ -926,6 +961,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
           await sendWhatsAppMessage({
             to,
             message: question.question || question.text || "Please provide your response:",
+            phoneNumberId,
           });
           return;
         }
@@ -936,6 +972,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
           surveyId: session.survey_id,
           question: question.question,
           options: question.options,
+          phoneNumberId,
         });
       },
     });
@@ -1165,7 +1202,7 @@ app.post('/admin/escalation/:ticketId/resolve', async (req: Request, res: Respon
       }
 
       if (err.message === 'not_found') {
-        return res.status(404).json({ error: 'Escalation not found' });
+        return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
       }
 
       console.error('Failed to resolve escalation', err);
@@ -1202,7 +1239,7 @@ app.delete('/admin/escalation/:ticketId', async (req: Request, res: Response) =>
     );
 
     if (!existing.rows.length) {
-      return res.status(404).json({ error: 'Escalation not found' });
+      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
     }
 
     const escalation = existing.rows[0];

@@ -2,6 +2,7 @@
 
 import { sendWhatsAppTyping } from '../whatsapp-client.js';
 import { sendAgentReply } from '../utils/send-agent-reply.js';
+import { normalizePhone } from '../utils/format_phone.js';
 
 export async function handleChatMessage({
   mastra,
@@ -9,6 +10,7 @@ export async function handleChatMessage({
   text,
   contactName,
   messageId,
+  phoneNumberId,
   sendMessage,
 }: {
   mastra: any;
@@ -16,24 +18,28 @@ export async function handleChatMessage({
   text: string;
   contactName?: string | null;
   messageId: string;
+  phoneNumberId?: string;
   sendMessage: (to: string, msg: string) => Promise<void>;
 }) {
   try {
     console.log('Chat handler triggered for', phone, 'with text:', text);
     const agent = mastra.getAgent('engagementAgent');
+    const normalizedPhone = normalizePhone(String(phone));
+    const phoneContext = `Customer WhatsApp phone: ${normalizedPhone}. This is the customer's current WhatsApp number from the webhook. You DO have access to this number. If the customer says "use the one you have", "use this number", or similar during escalation, treat this WhatsApp number as the provided contact number and only ask them to confirm whether it is the number linked to their FBNBank account. Do not say you do not have access to their phone number.`;
 
     // Send a typing indicator and keep re-sending it periodically
     // while the agent is generating a response so the user sees activity.
     try {
       // initial ping
-      await sendWhatsAppTyping({ to: phone, messageId }).catch(() => {});
+      await sendWhatsAppTyping({ to: phone, messageId, phoneNumberId }).catch(() => {});
       // keep-alive every 8s
       let intervalId: any = setInterval(() => {
-        sendWhatsAppTyping({ to: phone, messageId }).catch(() => {});
+        sendWhatsAppTyping({ to: phone, messageId, phoneNumberId }).catch(() => {});
       }, 8000);
 
       try {
         const messages: any[] = [];
+        messages.push({ role: 'system', content: phoneContext });
         if (contactName) {
           messages.push({ role: 'system', content: `Customer name: ${contactName}. Address the customer by this name when appropriate.` });
         }
@@ -51,7 +57,7 @@ export async function handleChatMessage({
 
         const rawReply = response?.text?.trim() || "Sorry, I couldn't process that. Please try again.";
         console.log('Sending WhatsApp message to', phone, 'with raw reply:', rawReply);
-        await sendAgentReply(phone, rawReply);
+        await sendAgentReply(phone, rawReply, phoneNumberId);
         return;
       } finally {
         clearInterval(intervalId);
@@ -61,6 +67,7 @@ export async function handleChatMessage({
     }
     // Fallback: if typing pings fail, generate and send without typing indicator
     const messages: any[] = [];
+    messages.push({ role: 'system', content: phoneContext });
     if (contactName) messages.push({ role: 'system', content: `Customer name: ${contactName}. Address the customer by this name when appropriate.` });
     messages.push({ role: 'user', content: text });
 
@@ -73,7 +80,7 @@ export async function handleChatMessage({
 
     const rawReply = response?.text?.trim() || "Sorry, I couldn't process that. Please try again.";
     console.log('Sending WhatsApp message to', phone, 'with raw reply:', rawReply);
-    await sendAgentReply(phone, rawReply);
+    await sendAgentReply(phone, rawReply, phoneNumberId);
   } catch (error) {
     console.error('❌ Chat handler error:', error);
 

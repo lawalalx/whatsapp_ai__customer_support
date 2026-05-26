@@ -6,6 +6,44 @@ import { surveyTemplates } from '../../surveyTemplates.js'
 import { normalizePhone } from "../../utils/format_phone.js";
 import { sendSurveyQuestion } from "../../utils/survey.sender.js";
 
+async function loadManualSurveyQuestions(surveyId?: string) {
+  if (!surveyId) return null;
+
+  try {
+    const fs = await import('fs/promises');
+    const p = `${process.cwd()}/data/${surveyId}.json`;
+
+    console.log('\n\nAttempting to load manual survey questions from:', p);
+    
+    const raw = await fs.readFile(p, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.questions)) {
+      return parsed.questions.map((q: any) => ({
+        question: q.text,
+        options: q.options || [],
+        type: q.type,
+        text: q.text,
+        sectionTitle: q.sectionTitle,
+        placeholder: q.placeholder,
+      }));
+    }
+  } catch (e) {
+    // ignore and fallback to built-in templates
+  }
+
+  const demo = surveyTemplates.find(s => s.id === surveyId);
+  if (!demo) return null;
+
+  return demo.questions.map(q => ({
+    question: q.text,
+    options: q.options || [],
+    type: q.type,
+    text: q.text,
+    sectionTitle: q.sectionTitle,
+    placeholder: q.placeholder,
+  }));
+}
+
 // ─── Step 1: Generate survey content using the Survey Agent ──────────────────
 
 const generateSurveyContent = createStep({
@@ -30,41 +68,9 @@ const generateSurveyContent = createStep({
   execute: async ({ inputData, mastra }) => {
     // Route by mode: manual = use local template, ai = generate
     if (inputData.mode === 'manual') {
-      // Prefer data/<surveyId>.json if present (created via admin endpoint),
-      // otherwise fall back to compiled `surveyTemplates`.
-      try {
-        const fs = await import('fs/promises');
-        const p = `${process.cwd()}/data/${inputData.surveyId}.json`;
-        const raw = await fs.readFile(p, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (parsed && Array.isArray(parsed.questions)) {
-          return {
-            questions: parsed.questions.map((q: any) => ({
-              question: q.text,
-              options: q.options || [],
-              type: q.type,
-              text: q.text,
-              sectionTitle: q.sectionTitle,
-              placeholder: q.placeholder,
-            })),
-          }
-        }
-      } catch (e) {
-        // ignore and fallback to built-in templates
-      }
-
-      const demo = surveyTemplates.find(s => s.id === inputData.surveyId)
-      if (demo) {
-        return {
-          questions: demo.questions.map(q => ({
-            question: q.text,
-            options: q.options || [],
-            type: q.type,
-            text: q.text,
-            sectionTitle: q.sectionTitle,
-            placeholder: q.placeholder,
-          })),
-        }
+      const manualQuestions = await loadManualSurveyQuestions(inputData.surveyId);
+      if (manualQuestions) {
+        return { questions: manualQuestions }
       } else {
         throw new Error('Manual mode: survey template not found')
       }
@@ -80,25 +86,39 @@ const generateSurveyContent = createStep({
     }
 
     // Try multi-question format first
-    const response = await agent.generate(
-      [{ role: 'user', content: prompt }],
-      {
-        structuredOutput: {
-          schema: z.object({
-            questions: z.array(z.object({
-              question: z.string(),
-              options: z.array(z.string()),
-            })).optional(),
-            question: z.string().optional(),
-            options: z.array(z.string()).optional(),
-          }),
-        },
-        memory: {
-          thread: `survey_thread_${Date.now()}`,
-          resource: `survey_${inputData.surveyId || 'default'}`,
-        },
+    let response;
+    try {
+      response = await agent.generate(
+        [{ role: 'user', content: prompt }],
+        {
+          structuredOutput: {
+            schema: z.object({
+              questions: z.array(z.object({
+                question: z.string(),
+                options: z.array(z.string()),
+              })).optional(),
+              question: z.string().optional(),
+              options: z.array(z.string()).optional(),
+            }),
+          },
+          memory: {
+            thread: `survey_thread_${Date.now()}`,
+            resource: `survey_${inputData.surveyId || 'default'}`,
+          },
+        }
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isTransientConnectionError = /ECONNRESET|Cannot connect to API/i.test(message);
+      if (isTransientConnectionError) {
+        const manualQuestions = await loadManualSurveyQuestions(inputData.surveyId);
+        if (manualQuestions) {
+          console.warn(`AI survey generation failed for ${inputData.surveyId}; falling back to local template.`, error);
+          return { questions: manualQuestions };
+        }
       }
-    )
+      throw error;
+    }
 
     if (!response.object) throw new Error('Failed to generate survey content')
 
@@ -214,6 +234,8 @@ export const surveyWorkflow = createWorkflow({
     to: z.string(),
     surveyId: z.string(),
     topic: z.string(),
+    context: z.string().optional(),
+    mode: z.enum(['ai', 'manual']).optional(),
   }),
   outputSchema: z.object({
     success: z.boolean(),

@@ -89,6 +89,8 @@ export const deleteEscalationTool = createTool({
   }),
   outputSchema: z.object({
     success: z.boolean(),
+    message: z.string().optional(),
+    ticketStatus: z.string().optional(),
   }),
   execute: async (input, context) => {
     const { ticketId } = input
@@ -99,23 +101,42 @@ export const deleteEscalationTool = createTool({
 
     if (storageDb && typeof storageDb.any === 'function') {
       try {
+        const existing = await storageDb.any(
+          'SELECT ticket_status FROM escalations WHERE ticket_id = $1',
+          [ticketId]
+        )
+
+        const ticket = Array.isArray(existing) && existing.length > 0 ? existing[0] : null
+        if (!ticket) {
+          console.warn('No ticket found to delete (via Mastra storage)')
+          return { success: false, message: 'Ticket not found.' }
+        }
+
+        if (ticket.ticket_status === 'completed') {
+          return {
+            success: false,
+            ticketStatus: ticket.ticket_status,
+            message: 'This ticket is already resolved and cannot be deleted.',
+          }
+        }
+
         const result = await storageDb.any(
           'DELETE FROM escalations WHERE ticket_id = $1 RETURNING *',
           [ticketId]
         )
         if (result.length > 0) {
           console.log('Ticket deleted successfully (via Mastra storage)')
-          return { success: true }
+          return { success: true, message: 'Ticket deleted successfully.' }
         } else {
           console.warn('No ticket found to delete (via Mastra storage)')
-          return { success: false }
+          return { success: false, message: 'Ticket not found.' }
         }
       } catch (error: any) {
         console.error('Error deleting ticket (mastra db):', error)
         if (error.code === '42P01') {
            console.error('CRITICAL: The "escalations" table does not exist in the Mastra database. Please create it.');
         }
-        return { success: false }
+        return { success: false, message: 'Failed to delete ticket.' }
       }
     }
 
@@ -123,6 +144,25 @@ export const deleteEscalationTool = createTool({
     let client;
     try {
       client = await pool.connect()
+      const existing = await client.query(
+        'SELECT ticket_status FROM escalations WHERE ticket_id = $1',
+        [ticketId]
+      )
+
+      const ticket = (existing.rowCount ?? 0) > 0 ? existing.rows[0] : null
+      if (!ticket) {
+        console.warn('No ticket found to delete (via local pool)')
+        return { success: false, message: 'Ticket not found.' }
+      }
+
+      if (ticket.ticket_status === 'completed') {
+        return {
+          success: false,
+          ticketStatus: ticket.ticket_status,
+          message: 'This ticket is already resolved and cannot be deleted.',
+        }
+      }
+
       const result = await client.query(
         'DELETE FROM escalations WHERE ticket_id = $1 RETURNING *',
         [ticketId]
@@ -130,17 +170,17 @@ export const deleteEscalationTool = createTool({
 
       if ((result.rowCount ?? 0) > 0) {
         console.log('Ticket deleted successfully (via local pool)')
-        return { success: true }
+        return { success: true, message: 'Ticket deleted successfully.' }
       } else {
         console.warn('No ticket found to delete (via local pool)')
-        return { success: false }
+        return { success: false, message: 'Ticket not found.' }
       }
     } catch (error: any) {
       console.error('Error deleting ticket (pool):', error)
       if (error.code === '42P01') {
            console.error('CRITICAL: The "escalations" table does not exist in the local database. Please create it.');
       }
-      return { success: false }
+      return { success: false, message: 'Failed to delete ticket.' }
     } finally {
       if (client) {
         try { client.release() } catch (e) { /* ignore */ }

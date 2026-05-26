@@ -47,4 +47,5 @@ export interface SendSurveyQuestionParams {
   to: string;
   session: SurveySession;
   question: SurveyQuestion;
+  phoneNumberId?: string;
 }

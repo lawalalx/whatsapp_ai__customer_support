@@ -57,7 +57,7 @@ export function extractOptions(raw: string): {
  * single interactive list message (body + Select button in one bubble).
  * Otherwise sends a plain text message.
  */
-export async function sendAgentReply(phone: string, rawText: string): Promise<void> {
+export async function sendAgentReply(phone: string, rawText: string, phoneNumberId?: string): Promise<void> {
   const to = normalizePhone(String(phone));
   const { text, options } = extractOptions(rawText);
 
@@ -76,6 +76,7 @@ export async function sendAgentReply(phone: string, rawText: string): Promise<vo
       bodyText,
       buttonText: 'Select',
       sections: [{ title: 'Options', rows }],
+      phoneNumberId,
     }).catch(err => {
       console.warn('⚠️ Interactive list send failed (non-fatal):', err);
       return false;
@@ -83,11 +84,11 @@ export async function sendAgentReply(phone: string, rawText: string): Promise<vo
 
     // Fallback to plain text if the interactive list call fails
     if (!sent) {
-      await sendWhatsAppMessage({ to, message: text });
+      await sendWhatsAppMessage({ to, message: text, phoneNumberId });
     }
     return;
   }
 
   // No options — plain text
-  await sendWhatsAppMessage({ to, message: text });
+  await sendWhatsAppMessage({ to, message: text, phoneNumberId });
 }

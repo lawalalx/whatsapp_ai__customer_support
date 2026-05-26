@@ -5,9 +5,17 @@ import "dotenv/config";
 import { SendSurveyParams } from "./flow.types.js";
 import { normalizePhone } from './utils/format_phone.js';
 
-const getConfig = () => {
+type WhatsAppRequestContext = {
+  phoneNumberId?: string;
+};
+
+const isWhatsAppMessageId = (messageId: string | undefined): boolean => {
+  return typeof messageId === 'string' && messageId.startsWith('wamid.');
+};
+
+const getConfig = (context?: WhatsAppRequestContext) => {
   const apiVersion = process.env.WHATSAPP_API_VERSION || 'v22.0';
-  const phoneNumberId = process.env.WHATSAPP_BUSINESS_PHONE_NUMBER_ID;
+  const phoneNumberId = context?.phoneNumberId || process.env.WHATSAPP_BUSINESS_PHONE_NUMBER_ID;
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
   if (!phoneNumberId || !accessToken) {
     throw new Error('Missing WHATSAPP_BUSINESS_PHONE_NUMBER_ID or WHATSAPP_ACCESS_TOKEN');
@@ -21,8 +29,8 @@ const getConfig = () => {
   };
 };
 
-async function post(payload: Record<string, unknown>): Promise<{ ok: boolean; data: any }> {
-  const { url, headers } = getConfig();
+async function post(payload: Record<string, unknown>, context?: WhatsAppRequestContext): Promise<{ ok: boolean; data: any }> {
+  const { url, headers } = getConfig(context);
   // Log request payload (safe) to help debug delivery problems
   try {
     console.log('WhatsApp API request URL:', url);
@@ -74,9 +82,10 @@ async function post(payload: Record<string, unknown>): Promise<{ ok: boolean; da
 export interface SendMessageParams {
   to: string;
   message: string;
+  phoneNumberId?: string;
 }
 
-export async function sendWhatsAppMessage({ to, message }: SendMessageParams): Promise<boolean> {
+export async function sendWhatsAppMessage({ to, message, phoneNumberId }: SendMessageParams): Promise<boolean> {
   console.log('sendWhatsAppMessage called with:', { to, message });
   const toNormalized = normalizePhone(String(to));
   if (toNormalized !== String(to)) {
@@ -88,7 +97,7 @@ export async function sendWhatsAppMessage({ to, message }: SendMessageParams): P
     to: toNormalized,
     type: 'text',
     text: { body: message },
-  });
+  }, { phoneNumberId });
   console.log('WhatsApp API returned for sendWhatsAppMessage:', JSON.stringify(data, null, 2));
   console.log(`📤 Sending message to ${to}: "${message}"`);
   if (ok) {
@@ -102,9 +111,14 @@ export async function sendWhatsAppMessage({ to, message }: SendMessageParams): P
 
 // ─── Mark message as read (turns grey ticks blue) ───────────────────────────
 // POST to /messages with status=read and the incoming message_id.
-export async function sendWhatsAppReadReceipt({ messageId }: { messageId: string }): Promise<boolean> {
+export async function sendWhatsAppReadReceipt({ messageId, phoneNumberId }: { messageId: string; phoneNumberId?: string }): Promise<boolean> {
   try {
-    const { url, headers } = getConfig();
+    if (!isWhatsAppMessageId(messageId)) {
+      console.warn('⚠️ Skipping read receipt for non-WhatsApp message id:', messageId);
+      return false;
+    }
+
+    const { url, headers } = getConfig({ phoneNumberId });
     const res = await fetch(url, {
       method: 'POST',
       headers,
@@ -130,12 +144,17 @@ export async function sendWhatsAppReadReceipt({ messageId }: { messageId: string
 // ─── Typing indicator ───────────────────────────────────────────────────────
 // Sends a typing indicator to the WhatsApp Cloud API.
 // Requires the wamid of the incoming message being responded to.
-export async function sendWhatsAppTyping({ to, messageId }: { to: string; messageId: string }): Promise<boolean> {
+export async function sendWhatsAppTyping({ to, messageId, phoneNumberId }: { to: string; messageId: string; phoneNumberId?: string }): Promise<boolean> {
   try {
+    if (!isWhatsAppMessageId(messageId)) {
+      console.warn('⚠️ Skipping typing indicator for non-WhatsApp message id:', messageId);
+      return false;
+    }
+
     const apiVersion = process.env.WHATSAPP_API_VERSION || 'v22.0';
-    const phoneNumberId = process.env.WHATSAPP_BUSINESS_PHONE_NUMBER_ID;
-    if (!phoneNumberId) throw new Error('Missing WHATSAPP_BUSINESS_PHONE_NUMBER_ID');
-    const url = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`;
+    const resolvedPhoneNumberId = phoneNumberId || process.env.WHATSAPP_BUSINESS_PHONE_NUMBER_ID;
+    if (!resolvedPhoneNumberId) throw new Error('Missing WHATSAPP_BUSINESS_PHONE_NUMBER_ID');
+    const url = `https://graph.facebook.com/${apiVersion}/${resolvedPhoneNumberId}/messages`;
     const { headers } = getConfig();
     const res = await fetch(url, {
       method: 'POST',
@@ -172,7 +191,8 @@ export async function sendWhatsAppSurvey({
   options,
   headerText,
   footerText,
-}: SendSurveyParams & { options?: { id: string; title: string }[] }): Promise<boolean> {
+  phoneNumberId,
+}: SendSurveyParams & { options?: { id: string; title: string }[]; phoneNumberId?: string }): Promise<boolean> {
   const safeString = (v: any, fallback = '') => String(v ?? fallback);
 
   if (!question) {
@@ -204,7 +224,7 @@ export async function sendWhatsAppSurvey({
         },
       };
 
-      const { ok, data } = await post(payload);
+      const { ok, data } = await post(payload, { phoneNumberId });
 
       if (ok) console.log(`📝 Text survey sent to ${to}`);
       else console.error('❌ WhatsApp API failed:', data);
@@ -239,7 +259,7 @@ export async function sendWhatsAppSurvey({
       },
     };
 
-    const { ok, data } = await post(payload);
+    const { ok, data } = await post(payload, { phoneNumberId });
 
     if (ok) console.log(`✅ Survey sent to ${to}: "${question}"`);
     else console.error('❌ WhatsApp API failed:', data);
@@ -266,6 +286,7 @@ export interface SendListParams {
   footerText?: string;
   buttonText: string;
   sections: ListSection[];
+  phoneNumberId?: string;
 }
 
 
@@ -277,6 +298,7 @@ export async function sendWhatsAppList({
   footerText,
   buttonText,
   sections,
+  phoneNumberId,
 }: SendListParams): Promise<boolean> {
   const interactive: Record<string, unknown> = {
     type: 'list',
@@ -303,7 +325,7 @@ export async function sendWhatsAppList({
     to,
     type: 'interactive',
     interactive,
-  });
+  }, { phoneNumberId });
   if (ok) console.log(`✅ List message sent to ${to}`);
   return ok;
 }
@@ -331,6 +353,7 @@ export interface SendTemplateParams {
   templateName: string;
   languageCode: string;
   components?: TemplateComponent[];
+  phoneNumberId?: string;
 }
 
 export async function sendWhatsAppTemplate({
@@ -338,6 +361,7 @@ export async function sendWhatsAppTemplate({
   templateName,
   languageCode,
   components,
+  phoneNumberId,
 }: SendTemplateParams): Promise<boolean> {
   const template: Record<string, unknown> = {
     name: templateName,
@@ -353,18 +377,23 @@ export async function sendWhatsAppTemplate({
     to,
     type: 'template',
     template,
-  });
+  }, { phoneNumberId });
   if (ok) console.log(`✅ Template "${templateName}" sent to ${to}`);
   return ok;
 }
 
 // ─── 5. Mark message as read ─────────────────────────────────────────────────
 
-export async function markAsRead(messageId: string): Promise<boolean> {
+export async function markAsRead(messageId: string, phoneNumberId?: string): Promise<boolean> {
+  if (!isWhatsAppMessageId(messageId)) {
+    console.warn('⚠️ Skipping markAsRead for non-WhatsApp message id:', messageId);
+    return false;
+  }
+
   const { ok } = await post({
     messaging_product: 'whatsapp',
     status: 'read',
     message_id: messageId,
-  });
+  }, { phoneNumberId });
   return ok;
 }

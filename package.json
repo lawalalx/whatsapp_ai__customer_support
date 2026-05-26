@@ -4,11 +4,12 @@
   "description": "",
   "main": "index.js",
   "packageManager": "pnpm@10.5.2",
+
   "scripts": {
-    "start:port": "node --import=tsx/esm dist/index.js --port",
+    "start:port": "node --import=tsx/esm src/index.ts --port",
     "dev": "node --import=tsx/esm src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node --import=tsx/esm src/index.ts",
     "webhook": "nodemon --config nodemon.json"
   },
   "keywords": [],

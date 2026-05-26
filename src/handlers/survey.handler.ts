@@ -119,7 +119,7 @@ export async function handleSurveyMessage({
       console.log('normalizedOptions:', normalizedOptions, 'normalizedAnswer:', normalizedAnswer)
       if (!normalizedOptions.includes(normalizedAnswer)) {
         console.log("❌ Invalid option provided - resending question")
-        await sendMessage(phone, "🙂 Please select from the available options above.")
+        await sendMessage(phone, "🙂 Please select from the available options below")
         // Re-send SAME question (do NOT move forward)
         return sendQuestion(phone, currentQuestion, session)
       }

@@ -22,6 +22,7 @@ type RouteIncomingMessageParams = {
   phone: string;
   contactName?: string | null;
   messageId: string;
+  phoneNumberId?: string;
 
   // process-lifetime map of last outbound message type per phone
   lastOutboundType?: Map<string, string>;
@@ -43,6 +44,7 @@ export async function routeIncomingMessage({
   phone,
   contactName,
   messageId,
+  phoneNumberId,
   lastOutboundType,
   sendMessage,
   sendQuestion,
@@ -154,6 +156,7 @@ export async function routeIncomingMessage({
       text: message.text.body,
       contactName,
       messageId,
+      phoneNumberId,
       sendMessage
     });
   }
@@ -169,6 +172,7 @@ export async function routeIncomingMessage({
       text: title,
       contactName,
       messageId,
+      phoneNumberId,
       sendMessage,
     });
   }
