@@ -9,5 +9,8 @@ dist
 .vercel 
 MYREADME.md
 # .env
+dist.zip
 uploads/
 deploy.zip
+scripts/
+META_TEMPLATES.md
