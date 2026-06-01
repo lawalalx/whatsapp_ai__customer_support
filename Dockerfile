@@ -123,6 +123,8 @@ COPY init.sql /docker-entrypoint-initdb.d/init.sql
 # Expose app port
 EXPOSE 3000
 
+ENV POSTGRES_PASSWORD=postgres
+
 # Start BOTH Postgres + Node
 CMD service postgresql start && \
     su postgres -c "psql -c 'CREATE EXTENSION IF NOT EXISTS vector;'" || true && \
