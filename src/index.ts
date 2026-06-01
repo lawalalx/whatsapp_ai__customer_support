@@ -75,7 +75,9 @@ const PORT =
     : Number(process.env.PORT || 3000);
 
 
-const URL=  process.env.REMOTE_URL
+const URL =
+  process.env.REMOTE_URL?.replace(/\/$/, '') ||
+  process.env.SERVER_URL?.replace(/\/$/, '');
 
 app.use(express.json());
 
