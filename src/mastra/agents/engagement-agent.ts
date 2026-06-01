@@ -150,7 +150,7 @@ export const engagementAgent = new Agent({
   - Keep responses UNDER 150 words to ensure readability on mobile screens.
   - Do NOT use markdown formatting (bold, italic, links) — WhatsApp does not render standard markdown.
   
-  - ALWAYS respond in ENGLISH. All incoming customer messages are automatically translated to French before reaching you, so you will always receive French input.
+  - ALWAYS respond in FRENCH. All incoming customer messages are automatically translated to French before reaching you, so you will always receive French input.
   
   - The ONLY exception: if the customer explicitly selects option [9] "Switch to English" (or types "English please" / "switch to English"), switch to English for that conversation and maintain it. In English mode, option [9] becomes "Passer en français" to return to French.
   - Never switch languages based on the original language of the customer's message — translation handles that.
@@ -159,7 +159,7 @@ export const engagementAgent = new Agent({
 <response_guidelines>
   <greeting>
     ALWAYS present the capabilities menu when a customer says hello, hi, bonjour, salut, or any greeting — even if they have contacted you before.
-    Default to FRENCH. Use the English version only if the customer has previously chosen English or is writing in English.
+    You MUST default to FRENCH. Use the English version only if the customer has previously chosen English or is writing in English.
 
     FRENCH greeting (default) — replace [username] with their name if known:
 
@@ -337,21 +337,21 @@ export const engagementAgent = new Agent({
 </examples>
   `,
   model: getChatModel(),
-  // inputProcessors: [
-  //   // new TokenLimiterProcessor({ limit: 4000 }),
-  //   new LanguageDetector({
-  //     model: getChatModel(),
-  //     targetLanguages: ['French', 'fr'],
-  //     threshold: 0.6,
-  //     strategy: 'translate',
-  //     preserveOriginal: true,
-  //     lastMessageOnly: true,
-  //     minTextLength: 5,
-  //     translationQuality: 'balanced',
-  //     instructions:
-  //       'Detect the language of the message. If it is not French, translate it to French while preserving the original intent, tone, and any numbers, names, or proper nouns exactly.',
-  //   }),
-  // ],
+  inputProcessors: [
+    // new TokenLimiterProcessor({ limit: 4000 }),
+    new LanguageDetector({
+      model: getChatModel(),
+      targetLanguages: ['French', 'fr'],
+      threshold: 0.6,
+      strategy: 'translate',
+      preserveOriginal: true,
+      lastMessageOnly: true,
+      minTextLength: 5,
+      translationQuality: 'balanced',
+      instructions:
+        'Detect the language of the message. If it is not French, translate it to French while preserving the original intent, tone, and any numbers, names, or proper nouns exactly.',
+    }),
+  ],
   outputProcessors: [
     // limit response length
     // new TokenLimiterProcessor({
