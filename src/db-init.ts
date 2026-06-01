@@ -272,10 +272,65 @@ export const initDatabase = async () => {
       $$;
     `);
 
+      // ─────────────────────────────────────────────────────────
+      // Meta WhatsApp Flow Surveys  (new tables migration)
+      // ─────────────────────────────────────────────────────────
+      await runMigration(
+        client,
+        '2026_06_meta_flow_surveys',
+        `
+          CREATE TABLE IF NOT EXISTS meta_flow_surveys (
+            id                TEXT PRIMARY KEY,
+            flow_id           TEXT UNIQUE NOT NULL,
+            flow_name         TEXT NOT NULL,
+            survey_id         TEXT,
+            questions_data    JSONB NOT NULL DEFAULT '[]'::jsonb,
+            status            TEXT NOT NULL DEFAULT 'draft'
+                              CHECK (status IN ('draft', 'published', 'deprecated')),
+            data_endpoint_url TEXT,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_meta_flow_surveys_status
+          ON meta_flow_surveys (status);
+
+          CREATE INDEX IF NOT EXISTS idx_meta_flow_surveys_survey_id
+          ON meta_flow_surveys (survey_id);
+        `
+      );
+
+      await runMigration(
+        client,
+        '2026_06_meta_flow_responses',
+        `
+          CREATE TABLE IF NOT EXISTS meta_flow_responses (
+            id              TEXT PRIMARY KEY,
+            flow_id         TEXT NOT NULL,
+            flow_token      TEXT UNIQUE NOT NULL,
+            customer_phone  TEXT,
+            survey_id       TEXT,
+            responses       JSONB NOT NULL DEFAULT '{}'::jsonb,
+            source          TEXT NOT NULL DEFAULT 'data_exchange'
+                            CHECK (source IN ('data_exchange', 'nfm_reply')),
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_meta_flow_responses_flow_id
+          ON meta_flow_responses (flow_id);
+
+          CREATE INDEX IF NOT EXISTS idx_meta_flow_responses_phone
+          ON meta_flow_responses (customer_phone);
+
+          CREATE INDEX IF NOT EXISTS idx_meta_flow_responses_created
+          ON meta_flow_responses (created_at DESC);
+        `
+      );
+
     client.release();
 
     console.log('✅ Database initialized successfully!');
-    console.log('   Tables: survey_sessions, survey_responses, escalations');
+    console.log('   Tables: survey_sessions, survey_responses, escalations, meta_flow_surveys, meta_flow_responses');
   } catch (error) {
     console.error('❌ Database initialization failed:', error);
     process.exit(1);

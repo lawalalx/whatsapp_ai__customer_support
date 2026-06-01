@@ -6,10 +6,10 @@ import escalationService from '../services/escalation-service.js';
 import chatHistoryService from '../services/chat-history-service.js';
 import { getActiveSurveySession } from "../services/session.service.js";
 
-
 import { Mastra } from '@mastra/core';
 import { normalizePhone } from '../utils/format_phone.js';
 import { sendSurveyQuestion } from '../utils/survey.sender.js';
+import * as metaSurveyService from '../meta-flow/meta-survey.service.js';
 
 // Simple in-memory name store for fallback when webhook doesn't provide contact name.
 // NOTE: This is process-local. For production persist to DB or agent memory store.
@@ -94,6 +94,40 @@ export async function routeIncomingMessage({
     }
 
     console.log('Human handoff is active for', normalizedPhone, '- suppressing automated reply while a human agent owns the conversation.');
+    return;
+  }
+
+  // ── Meta Flow nfm_reply: user completed a WhatsApp Flow survey ───────────
+  // When a Flow ends with a `complete` action, Meta sends an nfm_reply
+  // through the regular webhook. Save the payload to meta_flow_responses.
+  if (message?.type === 'interactive' && message?.interactive?.type === 'nfm_reply') {
+    try {
+      const nfmReply = message.interactive.nfm_reply;
+      const responseJson = nfmReply?.response_json;
+      if (responseJson) {
+        const parsed: Record<string, any> = typeof responseJson === 'string'
+          ? JSON.parse(responseJson)
+          : responseJson;
+
+        const flowToken = parsed?.flow_token;
+        const flowId = parsed?.flow_id;
+
+        if (flowToken) {
+          const { flow_token, flow_id, ...responseFields } = parsed;
+          await metaSurveyService.saveMetaFlowResponse(db, {
+            flowId: flowId || 'unknown',
+            flowToken,
+            customerPhone: normalizedPhone,
+            responses: responseFields,
+            source: 'nfm_reply',
+          });
+          console.log('[router] nfm_reply saved: flow=%s phone=%s', flowId, normalizedPhone);
+        }
+      }
+    } catch (err) {
+      console.error('[router] Failed to save nfm_reply response', err);
+    }
+    // Do not continue routing for nfm_reply messages
     return;
   }
 

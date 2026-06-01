@@ -3,6 +3,7 @@
 import "dotenv/config";
 import fs from 'fs/promises';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import swaggerUi from 'swagger-ui-express';
 import express, { Application, Request, Response } from 'express';
@@ -17,6 +18,19 @@ import chatHistoryService from './services/chat-history-service.js';
 import { initDatabase } from './db-init.js';
 // WhatsApp Webhook: Handle incoming messages
 import { routeIncomingMessage } from './webhook/router.js';
+
+// Meta WhatsApp Flow Surveys
+import { buildSurveyFlowJson } from './meta-flow/flow-builder.js';
+import * as metaSurveyService from './meta-flow/meta-survey.service.js';
+import {
+  createMetaFlow,
+  uploadFlowJsonBuffer,
+  publishFlow,
+  deprecateFlow,
+  deleteFlow,
+  getFlow,
+  sendFlowMessage,
+} from './mastra/metaFlowApi.js';
 
 // RAG / Knowledge Base
 import kbUploadRoute from './mastra/core/rag/routes/upload.route.js';
@@ -122,8 +136,8 @@ const swaggerDocument = {
   ],
   tags: [
     { name: 'Webhook', description: 'WhatsApp webhook verification and inbound events' },
-    { name: 'CRM', description: 'CRM-triggered survey and campaign endpoints' },
-    { name: 'Admin - Survey', description: 'Survey template and survey dataset management' },
+    { name: 'Admin - AI/Manual Survey', description: 'CRM-triggered survey and campaign endpoints modules' },
+    { name: 'Admin - Meta Survey', description: 'Create and manage WhatsApp Flow surveys powered by the Meta Flows API. Submissions are saved directly to your database.' },
     { name: 'Admin - Escalation', description: 'Human handoff and escalation operations' },
     { name: 'Admin - Chat History', description: 'Thread and message history retrieval endpoints' },
     { name: 'Knowledge Base', description: 'Knowledge base document ingest and management' },
@@ -132,6 +146,43 @@ const swaggerDocument = {
   ],
   components: {
     schemas: {
+      MetaFlowQuestion: {
+        type: 'object',
+        description: 'A single survey question for a Meta WhatsApp Flow',
+        required: ['id', 'text', 'type'],
+        properties: {
+          id: { type: 'string', description: 'Unique field name (snake_case, no spaces). Used as the form field key in submissions.', example: 'satisfaction' },
+          text: { type: 'string', description: 'Question text shown to the user (max 80 chars).', example: 'How satisfied are you with our service?' },
+          type: {
+            type: 'string',
+            description: `Component type:
+  • **list**     → \`Dropdown\` — best for 3–10 choices (max 200 options, each max 30 chars)
+  • **button**   → \`RadioButtonsGroup\` — best for 2–5 choices (each max 30 chars)
+  • **text**     → \`TextInput\` — single-line free text
+  • **textarea** → \`TextArea\` — multi-line free text
+  • **date**     → \`DatePicker\``,
+            enum: ['list', 'button', 'text', 'textarea', 'date'],
+            example: 'list'
+          },
+          options: { type: 'array', items: { type: 'string' }, description: 'Required for type `list` and `button`.', example: ['Very Satisfied','Satisfied','Neutral','Dissatisfied','Very Dissatisfied'] },
+          required: { type: 'boolean', description: 'Whether the field is mandatory. Defaults to `true`.', default: true },
+          placeholder: { type: 'string', description: 'Helper text shown inside the input component (max 80 chars).' },
+          sectionTitle: { type: 'string', description: 'Label for `RadioButtonsGroup` (max 30 chars). Falls back to `text` if omitted.' }
+        }
+      },
+      MetaFlowSurveyDefinition: {
+        type: 'object',
+        required: ['name', 'questions'],
+        properties: {
+          name: { type: 'string', example: 'Post-Transaction Survey', description: 'Survey name (first 30 chars used as screen title).' },
+          description: { type: 'string', description: 'Intro text on the opening screen.', example: 'Help us improve your banking experience.' },
+          surveyId: { type: 'string', description: 'Internal survey ID saved in DB.', example: 'csat-q1-2026' },
+          thankYouText: { type: 'string', description: 'Message on the terminal COMPLETE screen.', example: 'Thank you! Your feedback helps us serve you better.' },
+          questions: { type: 'array', items: { $ref: '#/components/schemas/MetaFlowQuestion' }, minItems: 1 },
+          autoPublish: { type: 'boolean', default: false, description: 'If true, publishes immediately after upload. **Irreversible** — published flows cannot be unpublished.' },
+          dataEndpointUrl: { type: 'string', example: 'https://your-server.ngrok.io/webhook/meta-flow-data', description: 'HTTPS URL of your data endpoint. Defaults to `SERVER_URL + /webhook/meta-flow-data`.' }
+        }
+      },
       SurveyQuestion: {
         type: 'object',
         properties: {
@@ -189,7 +240,7 @@ const swaggerDocument = {
   '/api/crm/send-survey': {
     post: {
       summary: 'Send a survey to a single customer',
-      tags: ['CRM'],
+      tags: ['Admin - AI/Manual Survey'],
       description: `
       Triggers a Mastra workflow to send a survey via WhatsApp.
 
@@ -259,7 +310,7 @@ const swaggerDocument = {
   '/api/crm/bulk-send-survey': {
     post: {
     summary: 'Send surveys to multiple customers',
-    tags: ['CRM'],
+    tags: ['Admin - AI/Manual Survey'],
     description: `
     Triggers survey workflows for multiple customers in a single request.
 
@@ -363,22 +414,322 @@ const swaggerDocument = {
   }
   },
 
-  '/api/crm/create-meta-flow': {
+  // ─── Admin - Meta Survey ──────────────────────────────────────────────────
+
+  '/admin/meta-survey': {
     post: {
-      summary: 'Create and publish Meta (WhatsApp) flow',
-      tags: ['CRM'],
-      description: `
-        Creates and publishes a WhatsApp interactive flow using Meta APIs.
+      summary: 'Create a Meta WhatsApp Flow survey',
+      tags: ['Admin - Meta Survey'],
+      description: `Creates a survey as a Meta WhatsApp Flow:
 
-        Used for structured, pre-approved conversational flows outside the 24-hour messaging window.
+1. Generates valid Flow JSON from your questions
+2. Creates the flow on the Meta Flows API
+3. Uploads the Flow JSON
+4. Optionally publishes it (\`autoPublish: true\`)
+5. Saves the registration to your local DB
 
-        Typically required for:
-        - Compliance messaging
-        - Proactive outreach
-      `,
+When a customer submits the form in WhatsApp, responses are POSTed to your \`/webhook/meta-flow-data\` endpoint and saved to \`meta_flow_responses\`.
+
+---
+### Question types
+
+| type | WhatsApp component | Best for | Max options |
+|------|-------------------|----------|-------------|
+| \`list\` | Dropdown | 3–10 choices | 200 |
+| \`button\` | RadioButtonsGroup | 2–5 choices | 5 |
+| \`text\` | TextInput | Short free text | — |
+| \`textarea\` | TextArea | Long free text | — |
+| \`date\` | DatePicker | Date selection | — |
+
+### Flow screen layout
+\`\`\`
+INTRO (navigate) → QUESTIONS (data_exchange) → COMPLETE (terminal)
+\`\`\`
+
+> **Publishing note:** Once published, a flow **cannot be unpublished** — only deprecated. Use \`autoPublish: false\` (default) to review in the Meta Flow Builder first.`,
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/MetaFlowSurveyDefinition' },
+            examples: {
+              csat: {
+                summary: 'CSAT Survey (3 questions, mixed types)',
+                value: {
+                  name: 'Post-Transaction Survey',
+                  description: 'Help us improve your banking experience. Takes 1 minute.',
+                  surveyId: 'csat-q1-2026',
+                  thankYouText: 'Thank you! Your feedback helps us serve you better.',
+                  autoPublish: false,
+                  questions: [
+                    { id: 'satisfaction', text: 'How satisfied are you with our service?', type: 'list', options: ['Very Satisfied','Satisfied','Neutral','Dissatisfied','Very Dissatisfied'], required: true },
+                    { id: 'recommend', text: 'Would you recommend FBNBank to a friend?', type: 'button', options: ['Yes','No','Maybe'], required: true },
+                    { id: 'improvement', text: 'What can we improve?', type: 'textarea', required: false, placeholder: 'Tell us what you think...' }
+                  ]
+                }
+              },
+              nps: {
+                summary: 'NPS Survey',
+                value: {
+                  name: 'Net Promoter Score',
+                  surveyId: 'nps-2026',
+                  autoPublish: false,
+                  questions: [
+                    { id: 'nps_score', text: 'How likely are you to recommend us? (1–10)', type: 'list', options: ['1','2','3','4','5','6','7','8','9','10'], required: true },
+                    { id: 'nps_reason', text: 'Main reason for your score?', type: 'textarea', required: false }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
       responses: {
-        '200': { description: 'Meta flow created and published' },
-        '500': { description: 'Flow creation failed' }
+        '201': {
+          description: 'Flow created (and optionally published)',
+          content: { 'application/json': { schema: { type: 'object', properties: {
+            success: { type: 'boolean' },
+            flowId: { type: 'string' },
+            surveyId: { type: 'string', nullable: true },
+            status: { type: 'string', enum: ['draft','published'] },
+            dataEndpointUrl: { type: 'string' },
+            uploadResult: { type: 'object' },
+            publishResult: { type: 'object', nullable: true }
+          }}}}
+        },
+        '400': { description: 'Validation error' },
+        '500': { description: 'Meta API or server error' }
+      }
+    },
+    get: {
+      summary: 'List all registered Meta Flow surveys',
+      tags: ['Admin - Meta Survey'],
+      description: 'Returns all Meta WhatsApp Flow surveys registered in the local DB, ordered by creation date descending.',
+      responses: {
+        '200': { description: 'Array of survey records' }
+      }
+    }
+  },
+
+  '/admin/meta-survey/{flowId}': {
+    get: {
+      summary: 'Get a specific Meta Flow survey',
+      tags: ['Admin - Meta Survey'],
+      description: 'Returns the local DB record plus live status from the Meta Flows API (includes validation errors and preview URL).',
+      parameters: [{ name: 'flowId', in: 'path', required: true, schema: { type: 'string' } }],
+      responses: { '200': { description: 'Survey details' }, '404': { description: 'Not found' } }
+    },
+    delete: {
+      summary: 'Delete a DRAFT Meta Flow survey',
+      tags: ['Admin - Meta Survey'],
+      description: 'Hard-deletes the flow from Meta and removes the local DB survey record. Only works on **DRAFT** flows that were never published. For published flows use `/delete-published`.',
+      parameters: [{ name: 'flowId', in: 'path', required: true, schema: { type: 'string' } }],
+      responses: {
+        '200': { description: 'Deleted' },
+        '400': { description: 'Flow is published — use /delete-published' },
+        '404': { description: 'Not found' }
+      }
+    }
+  },
+
+  '/admin/meta-survey/{flowId}/publish': {
+    post: {
+      summary: 'Publish a Meta Flow survey',
+      tags: ['Admin - Meta Survey'],
+      description: '⚠ **Irreversible.** Makes the flow live. Verify in the Meta Flow Builder before publishing. To stop sending, use `/deprecate`.',
+      parameters: [{ name: 'flowId', in: 'path', required: true, schema: { type: 'string' } }],
+      responses: { '200': { description: 'Published' }, '404': { description: 'Not found' } }
+    }
+  },
+
+  '/admin/meta-survey/{flowId}/deprecate': {
+    post: {
+      summary: 'Deprecate a published Meta Flow',
+      tags: ['Admin - Meta Survey'],
+      description: 'Soft-disables a published flow. The flow can no longer be sent to customers. Existing response data is preserved.',
+      parameters: [{ name: 'flowId', in: 'path', required: true, schema: { type: 'string' } }],
+      responses: { '200': { description: 'Deprecated' }, '404': { description: 'Not found' } }
+    }
+  },
+
+  '/admin/meta-survey/{flowId}/delete-published': {
+    delete: {
+      summary: 'Delete a PUBLISHED Meta Flow survey',
+      tags: ['Admin - Meta Survey'],
+      description: 'For published/deprecated flows: deprecates on Meta (if needed) and removes the local survey record. Responses are preserved. Use `/delete-with-responses` to remove responses too.',
+      parameters: [{ name: 'flowId', in: 'path', required: true, schema: { type: 'string' } }],
+      responses: {
+        '200': { description: 'Published flow removed from local registry' },
+        '400': { description: 'Flow is not published/deprecated' },
+        '404': { description: 'Not found' }
+      }
+    }
+  },
+
+  '/admin/meta-survey/{flowId}/delete-with-responses': {
+    delete: {
+      summary: 'Delete a flow and all its saved responses',
+      tags: ['Admin - Meta Survey'],
+      description: 'Deletes the flow handling state and all local response records for the given flow. For DRAFT flows, it hard-deletes on Meta. For published/deprecated flows, it deprecates (if needed) then removes local records.',
+      parameters: [{ name: 'flowId', in: 'path', required: true, schema: { type: 'string' } }],
+      responses: {
+        '200': { description: 'Flow and responses deleted from local DB' },
+        '404': { description: 'Not found' }
+      }
+    }
+  },
+
+  '/api/crm/meta-survey/send': {
+    post: {
+      summary: 'Send a Meta Flow survey to one or many customers',
+      tags: ['Admin - Meta Survey'],
+      description: `Sends an interactive WhatsApp Flow message with a CTA button that opens the survey inside WhatsApp.
+
+You can send to a **single customer** or a **list of customers** in one request.
+
+The **\`flowToken\`** can be any non-empty string (for example \`first-survey\`).
+- If omitted, the server auto-generates one.
+- If sending to multiple recipients, the server appends \`-1\`, \`-2\`, ... to keep each token unique for DB correlation.`,
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['to','flowId'],
+              properties: {
+                to: {
+                  oneOf: [
+                    { type: 'string', example: '2349013360717' },
+                    { type: 'array', items: { type: 'string' }, example: ['2349013360717', '2348012345678'], minItems: 1 }
+                  ],
+                  description: 'Recipient phone or list of recipient phones in E.164 without +.'
+                },
+                flowId: { type: 'string', example: '1234567890', description: 'Meta Flow ID returned by POST /admin/meta-survey' },
+                flowToken: { type: 'string', example: 'first-survey', description: 'Optional base token. Can be any non-empty string. For bulk sends, server auto-suffixes per recipient for uniqueness.' },
+                cta: { type: 'string', default: 'Take Survey', description: 'CTA button label (max 20 chars)' },
+                headerText: { type: 'string', description: 'Message header (max 60 chars)' },
+                bodyText: { type: 'string', description: 'Message body shown before the CTA button (max 1024 chars)' },
+                footerText: { type: 'string', description: 'Message footer (max 60 chars)' },
+                phoneNumberId: { type: 'string', description: 'Override WhatsApp Phone Number ID (defaults to env var)' }
+              }
+            },
+            examples: {
+              single: {
+                summary: 'Single recipient',
+                value: {
+                  to: '2349013360717',
+                  flowId: '1234567890',
+                  flowToken: 'first-survey',
+                  cta: 'Take Survey',
+                  bodyText: 'Please help us improve by completing a 1-minute survey.',
+                  headerText: 'Quick Survey'
+                }
+              },
+              bulk: {
+                summary: 'Bulk recipients',
+                value: {
+                  to: ['2349013360717', '2348012345678'],
+                  flowId: '1234567890',
+                  flowToken: 'june-csat',
+                  cta: 'Take Survey',
+                  bodyText: 'Please complete this 1-minute survey.'
+                }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        '200': { description: 'Message(s) sent (all or partial success)' },
+        '400': { description: 'Validation error' },
+        '500': { description: 'Send failed for all recipients' }
+      }
+    }
+  },
+
+  '/webhook/meta-flow-data': {
+    post: {
+      summary: 'Meta Flow Data Endpoint (submissions receiver)',
+      tags: ['Webhook'],
+      description: `**WhatsApp Flows Data Endpoint** — Meta calls this URL during flow execution.
+
+Set this as the \`dataEndpointUrl\` when creating surveys (or set \`SERVER_URL\` env var).
+
+### Actions
+
+| action | trigger | server response |
+|--------|---------|-----------------|
+| \`INIT\` | User opens QUESTIONS screen | \`{ screen: "QUESTIONS", data: {} }\` |
+| \`data_exchange\` | User taps **Submit Responses** | Saves to DB → \`{ screen: "COMPLETE", data: {} }\` |
+| \`BACK\` | User navigates back (if refresh_on_back=true) | \`{ screen: current, data: {} }\` |
+
+### Response saved on \`data_exchange\`
+Form fields are saved immediately to \`meta_flow_responses\` with:
+- \`flow_id\` — the Meta Flow ID
+- \`flow_token\` — unique token from the send (correlates to your send record)
+- \`responses\` — map of question IDs → submitted values
+- \`source: "data_exchange"\`
+
+> **Production note:** Meta encrypts the payload. Add decryption using \`FLOW_PRIVATE_KEY\` before going live.`,
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                version: { type: 'string', example: '3.0' },
+                action: { type: 'string', enum: ['INIT','data_exchange','BACK'] },
+                screen: { type: 'string', example: 'QUESTIONS' },
+                data: { type: 'object', description: 'For data_exchange: map of form field names to values', example: { satisfaction: 'Very Satisfied', recommend: 'Yes', improvement: 'Faster app' } },
+                flow_token: { type: 'string', example: 'a3f7c1d2-0000-4abc-b789-0000deadbeef' },
+                flow_id: { type: 'string', example: '1234567890' }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        '200': { description: 'Returns next screen instruction for the Flow client' },
+        '500': { description: 'Server error' }
+      }
+    }
+  },
+
+  '/api/meta-survey/responses': {
+    get: {
+      summary: 'Query Meta Flow survey responses',
+      tags: ['Admin - Meta Survey'],
+      description: 'Returns survey responses saved from Meta WhatsApp Flow submissions (both `data_exchange` and `nfm_reply` sources).',
+      parameters: [
+        { name: 'flowId', in: 'query', required: false, schema: { type: 'string' }, description: 'Filter by Meta Flow ID' },
+        { name: 'customerPhone', in: 'query', required: false, schema: { type: 'string' }, description: 'Filter by customer phone (E.164 without +)' },
+        { name: 'surveyId', in: 'query', required: false, schema: { type: 'string' }, description: 'Filter by internal survey ID' },
+        { name: 'source', in: 'query', required: false, schema: { type: 'string', enum: ['data_exchange','nfm_reply'] }, description: 'Filter by submission source' },
+        { name: 'from', in: 'query', required: false, schema: { type: 'string', format: 'date-time' }, description: 'Start date (ISO 8601)' },
+        { name: 'to', in: 'query', required: false, schema: { type: 'string', format: 'date-time' }, description: 'End date (ISO 8601)' },
+        { name: 'limit', in: 'query', required: false, schema: { type: 'integer', default: 50, maximum: 500 } },
+        { name: 'offset', in: 'query', required: false, schema: { type: 'integer', default: 0 } }
+      ],
+      responses: {
+        '200': {
+          description: 'Array of response records',
+          content: { 'application/json': { schema: { type: 'object', properties: {
+            count: { type: 'integer' },
+            total: { type: 'integer', description: 'Total matching records' },
+            responses: { type: 'array', items: { type: 'object', properties: {
+              id: { type: 'string' },
+              flow_id: { type: 'string' },
+              flow_token: { type: 'string' },
+              customer_phone: { type: 'string', nullable: true },
+              survey_id: { type: 'string', nullable: true },
+              responses: { type: 'object', description: 'Map of question IDs to submitted values', example: { satisfaction: 'Very Satisfied', recommend: 'Yes' } },
+              source: { type: 'string', enum: ['data_exchange','nfm_reply'] },
+              created_at: { type: 'string', format: 'date-time' }
+            }}}
+          }}}}
+        }
       }
     }
   },
@@ -386,7 +737,7 @@ const swaggerDocument = {
   '/api/crm/survey-responses': {
     get: {
       summary: 'Retrieve survey responses',
-      tags: ['CRM'],
+      tags: ['Admin - AI/Manual Survey'],
       description: `
       Fetches stored survey responses from the database.
 
@@ -440,7 +791,7 @@ const swaggerDocument = {
   '/api/crm/meta-survey-responses': {
     get: {
       summary: 'Meta survey responses (placeholder)',
-      tags: ['CRM'],
+      tags: ['Admin - AI/Manual Survey'],
       description: `
       Placeholder endpoint for retrieving responses from Meta-hosted survey flows.
 
@@ -455,7 +806,7 @@ const swaggerDocument = {
   '/admin/survey': {
     post: {
       summary: 'Create and store a manual survey template',
-      tags: ['Admin - Survey'],
+      tags: ['Admin - AI/Manual Survey'],
       description: `
       Creates a reusable survey template and stores it locally as a JSON file.
 
@@ -486,7 +837,7 @@ const swaggerDocument = {
   '/admin/survey/{surveyId}/participants': {
     get: {
       summary: 'Get survey participants',
-      tags: ['Admin - Survey'],
+      tags: ['Admin - AI/Manual Survey'],
       description: `
       Returns a list of unique customer phone numbers who have participated in a given survey.
 
@@ -543,7 +894,7 @@ const swaggerDocument = {
   '/admin/survey/{surveyId}/file': {
     delete: {
       summary: 'Delete survey template file',
-      tags: ['Admin - Survey'],
+      tags: ['Admin - AI/Manual Survey'],
       description: `
       Deletes a locally stored survey template JSON file from the data directory.
 
@@ -568,7 +919,7 @@ const swaggerDocument = {
   '/admin/survey/{surveyId}': {
     delete: {
       summary: 'Delete survey (data + sessions)',
-      tags: ['Admin - Survey'],
+      tags: ['Admin - AI/Manual Survey'],
       description: `
       Deletes all data associated with a survey, including:
       - Survey responses
@@ -1846,6 +2197,357 @@ app.post('/admin/escalation/:ticketId/resolve', async (req: Request, res: Respon
   } catch (e) {
     console.error('Failed to resolve escalation', e);
     return res.status(500).json({ error: 'Failed to resolve escalation' });
+  }
+});
+
+// ─── Admin - Meta Survey Routes ──────────────────────────────────────────────
+
+app.post('/admin/meta-survey', async (req: Request, res: Response) => {
+  try {
+    const { name, description, surveyId, thankYouText, questions, autoPublish, dataEndpointUrl } = req.body || {};
+
+    if (!name || !Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ error: 'name and questions (non-empty array) are required' });
+    }
+
+    const serverUrl = (process.env.SERVER_URL || '').replace(/\/$/, '');
+    const endpointUrl = dataEndpointUrl || `${serverUrl}/webhook/meta-flow-data`;
+
+    if (!endpointUrl.startsWith('https://')) {
+      return res.status(400).json({
+        error: 'dataEndpointUrl must be a valid HTTPS URL. Set the SERVER_URL env var or pass dataEndpointUrl in the body.',
+      });
+    }
+
+    for (const q of questions) {
+      if (!q.id || !q.text || !q.type) {
+        return res.status(400).json({ error: `Each question must have id, text, and type. Invalid: ${JSON.stringify(q)}` });
+      }
+      if (['list', 'button'].includes(q.type) && (!Array.isArray(q.options) || q.options.length === 0)) {
+        return res.status(400).json({ error: `Question "${q.id}" of type "${q.type}" must have a non-empty options array` });
+      }
+    }
+
+    const flowJson = buildSurveyFlowJson({ id: surveyId, name, description, questions, thankYouText }, endpointUrl);
+    const flowJsonBuffer = Buffer.from(JSON.stringify(flowJson, null, 2));
+
+    const flowId = await createMetaFlow(name, ['SURVEY']);
+    const uploadResult = await uploadFlowJsonBuffer(flowId, flowJsonBuffer);
+
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) throw new Error('DB not initialized');
+
+    await metaSurveyService.upsertMetaFlowSurvey(db, {
+      flowId, flowName: name, surveyId: surveyId || null,
+      questionsData: questions, status: 'draft', dataEndpointUrl: endpointUrl,
+    });
+
+    let publishResult: any = null;
+    if (autoPublish) {
+      publishResult = await publishFlow(flowId);
+      await metaSurveyService.markFlowPublished(db, flowId);
+    }
+
+    return res.status(201).json({
+      success: true, flowId, surveyId: surveyId || null,
+      status: autoPublish ? 'published' : 'draft',
+      dataEndpointUrl: endpointUrl, uploadResult, publishResult,
+    });
+  } catch (e: any) {
+    console.error('POST /admin/meta-survey failed', e);
+    return res.status(500).json({ error: e.message || 'Failed to create meta survey' });
+  }
+});
+
+app.get('/admin/meta-survey', async (req: Request, res: Response) => {
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+    const surveys = await metaSurveyService.listMetaFlowSurveys(db);
+    return res.status(200).json({ count: surveys.length, surveys });
+  } catch (e: any) {
+    console.error('GET /admin/meta-survey failed', e);
+    return res.status(500).json({ error: e.message || 'Failed to list meta surveys' });
+  }
+});
+
+app.get('/admin/meta-survey/:flowId', async (req: Request, res: Response) => {
+  const { flowId } = req.params;
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+    const local = await metaSurveyService.getMetaFlowSurveyByFlowId(db, flowId);
+    if (!local) return res.status(404).json({ error: 'Survey not found in local database' });
+    let meta: any = null;
+    try { meta = await getFlow(flowId); } catch (_) { /* non-fatal */ }
+    return res.status(200).json({ local, meta });
+  } catch (e: any) {
+    console.error(`GET /admin/meta-survey/${flowId} failed`, e);
+    return res.status(500).json({ error: e.message || 'Failed to get meta survey' });
+  }
+});
+
+app.post('/admin/meta-survey/:flowId/publish', async (req: Request, res: Response) => {
+  const { flowId } = req.params;
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+    const local = await metaSurveyService.getMetaFlowSurveyByFlowId(db, flowId);
+    if (!local) return res.status(404).json({ error: 'Survey not found in local database' });
+    const result = await publishFlow(flowId);
+    await metaSurveyService.markFlowPublished(db, flowId);
+    return res.status(200).json({ success: true, flowId, result });
+  } catch (e: any) {
+    console.error(`POST /admin/meta-survey/${flowId}/publish failed`, e);
+    return res.status(500).json({ error: e.message || 'Publish failed' });
+  }
+});
+
+app.post('/admin/meta-survey/:flowId/deprecate', async (req: Request, res: Response) => {
+  const { flowId } = req.params;
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+    const result = await deprecateFlow(flowId);
+    await metaSurveyService.markFlowDeprecated(db, flowId);
+    return res.status(200).json({ success: true, flowId, result });
+  } catch (e: any) {
+    console.error(`POST /admin/meta-survey/${flowId}/deprecate failed`, e);
+    return res.status(500).json({ error: e.message || 'Deprecate failed' });
+  }
+});
+
+app.delete('/admin/meta-survey/:flowId', async (req: Request, res: Response) => {
+  const { flowId } = req.params;
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+    const local = await metaSurveyService.getMetaFlowSurveyByFlowId(db, flowId);
+    if (!local) return res.status(404).json({ error: 'Survey not found in local database' });
+    if (local.status === 'published') {
+      return res.status(400).json({ error: 'Published flows cannot be hard-deleted. Use DELETE /admin/meta-survey/:flowId/delete-published instead.' });
+    }
+    await deleteFlow(flowId);
+    await metaSurveyService.deleteMetaFlowSurveyRecord(db, flowId);
+    return res.status(200).json({ success: true, flowId, deleted: true });
+  } catch (e: any) {
+    console.error(`DELETE /admin/meta-survey/${flowId} failed`, e);
+    return res.status(500).json({ error: e.message || 'Delete failed' });
+  }
+});
+
+app.delete('/admin/meta-survey/:flowId/delete-published', async (req: Request, res: Response) => {
+  const { flowId } = req.params;
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+
+    const local = await metaSurveyService.getMetaFlowSurveyByFlowId(db, flowId);
+    if (!local) return res.status(404).json({ error: 'Survey not found in local database' });
+
+    if (!['published', 'deprecated'].includes(local.status)) {
+      return res.status(400).json({ error: 'Only published/deprecated flows can use this endpoint. Use DELETE /admin/meta-survey/:flowId for draft flows.' });
+    }
+
+    if (local.status === 'published') {
+      await deprecateFlow(flowId);
+      await metaSurveyService.markFlowDeprecated(db, flowId);
+    }
+
+    await metaSurveyService.deleteMetaFlowSurveyRecord(db, flowId);
+    return res.status(200).json({ success: true, flowId, deletedSurvey: true, responsesDeleted: false });
+  } catch (e: any) {
+    console.error(`DELETE /admin/meta-survey/${flowId}/delete-published failed`, e);
+    return res.status(500).json({ error: e.message || 'Delete published flow failed' });
+  }
+});
+
+app.delete('/admin/meta-survey/:flowId/delete-with-responses', async (req: Request, res: Response) => {
+  const { flowId } = req.params;
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+
+    const local = await metaSurveyService.getMetaFlowSurveyByFlowId(db, flowId);
+    if (!local) return res.status(404).json({ error: 'Survey not found in local database' });
+
+    if (local.status === 'draft') {
+      await deleteFlow(flowId);
+    } else if (local.status === 'published') {
+      await deprecateFlow(flowId);
+      await metaSurveyService.markFlowDeprecated(db, flowId);
+    }
+
+    const totalResponses = await metaSurveyService.countMetaFlowResponses(db, { flowId });
+    await metaSurveyService.deleteMetaFlowResponsesByFlowId(db, flowId);
+    await metaSurveyService.deleteMetaFlowSurveyRecord(db, flowId);
+
+    return res.status(200).json({
+      success: true,
+      flowId,
+      deletedSurvey: true,
+      responsesDeleted: totalResponses,
+    });
+  } catch (e: any) {
+    console.error(`DELETE /admin/meta-survey/${flowId}/delete-with-responses failed`, e);
+    return res.status(500).json({ error: e.message || 'Delete flow and responses failed' });
+  }
+});
+
+app.post('/api/crm/meta-survey/send', async (req: Request, res: Response) => {
+  try {
+    const { to, flowId, flowToken, cta, headerText, bodyText, footerText, phoneNumberId } = req.body || {};
+    if (!to || !flowId) {
+      return res.status(400).json({ error: 'to and flowId are required' });
+    }
+
+    const recipients = (Array.isArray(to) ? to : [to])
+      .map((phone: any) => normalizePhone(String(phone || '')))
+      .filter(Boolean);
+
+    if (recipients.length === 0) {
+      return res.status(400).json({ error: 'at least one valid recipient is required in to' });
+    }
+
+    const baseFlowToken = typeof flowToken === 'string' && flowToken.trim().length > 0
+      ? flowToken.trim()
+      : `flow-${Date.now()}-${randomUUID().slice(0, 8)}`;
+
+    if (baseFlowToken.length > 120) {
+      return res.status(400).json({ error: 'flowToken must be 120 characters or fewer' });
+    }
+
+    const settled = await Promise.allSettled(recipients.map((phone, i) => {
+      const tokenForRecipient = recipients.length === 1
+        ? baseFlowToken
+        : `${baseFlowToken}-${i + 1}`;
+
+      return sendFlowMessage({
+        to: phone,
+        flowId,
+        flowToken: tokenForRecipient,
+        cta: cta || 'Take Survey',
+        headerText,
+        bodyText,
+        footerText,
+        phoneNumberId,
+      }).then((result) => ({ to: phone, flowToken: tokenForRecipient, result }));
+    }));
+
+    const results = settled.map((entry, idx) => {
+      const phone = recipients[idx];
+      const tokenForRecipient = recipients.length === 1 ? baseFlowToken : `${baseFlowToken}-${idx + 1}`;
+      if (entry.status === 'fulfilled') {
+        return { success: true, to: phone, flowToken: tokenForRecipient, result: entry.value.result };
+      }
+      const message = entry.reason instanceof Error ? entry.reason.message : String(entry.reason);
+      return { success: false, to: phone, flowToken: tokenForRecipient, error: message };
+    });
+
+    const sent = results.filter((r) => r.success).length;
+    const failed = results.length - sent;
+
+    if (sent === 0) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to send flow message to all recipients',
+        flowId,
+        sent,
+        failed,
+        results,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      partial: failed > 0,
+      flowId,
+      baseFlowToken,
+      sent,
+      failed,
+      results,
+    });
+  } catch (e: any) {
+    console.error('POST /api/crm/meta-survey/send failed', e);
+    return res.status(500).json({ error: e.message || 'Failed to send flow message' });
+  }
+});
+
+// POST /webhook/meta-flow-data — WhatsApp Flow Data Endpoint
+// Meta calls this during flow execution for INIT and data_exchange actions.
+app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
+  try {
+    // Production: Meta encrypts the request. Decrypt using FLOW_PRIVATE_KEY before reading body.
+    const body = req.body || {};
+    const { version = '3.0', action, screen, data, flow_token, flow_id } = body;
+
+    console.log('[meta-flow-data] action=%s screen=%s token=%s', action, screen, flow_token);
+
+    if (action === 'INIT' || action === 'BACK') {
+      return res.status(200).json({ version, screen: screen || 'QUESTIONS', data: {} });
+    }
+
+    if (action === 'data_exchange') {
+      const storage = mastra.getStorage() as any;
+      const db = storage?.db;
+
+      if (db && flow_id && flow_token && data && typeof data === 'object') {
+        let surveyId: string | undefined;
+        try {
+          const rec = await metaSurveyService.getMetaFlowSurveyByFlowId(db, flow_id);
+          surveyId = rec?.survey_id ?? undefined;
+        } catch (_) { /* non-fatal */ }
+
+        await metaSurveyService.saveMetaFlowResponse(db, {
+          flowId: flow_id,
+          flowToken: flow_token,
+          surveyId,
+          responses: data as Record<string, any>,
+          source: 'data_exchange',
+        });
+        console.log('[meta-flow-data] Saved response flow=%s token=%s', flow_id, flow_token);
+      }
+
+      return res.status(200).json({ version, screen: 'COMPLETE', data: {} });
+    }
+
+    return res.status(200).json({ version, screen: screen || 'INTRO', data: {} });
+  } catch (e: any) {
+    console.error('POST /webhook/meta-flow-data failed', e);
+    return res.status(200).json({ version: '3.0', screen: 'COMPLETE', data: {} });
+  }
+});
+
+app.get('/api/meta-survey/responses', async (req: Request, res: Response) => {
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+
+    const { flowId, customerPhone, surveyId, source, from, to } = req.query as Record<string, string>;
+    const limit = req.query.limit ? Math.min(Number.parseInt(req.query.limit as string, 10), 500) : 50;
+    const offset = req.query.offset ? Number.parseInt(req.query.offset as string, 10) : 0;
+
+    if (!Number.isFinite(limit) || limit < 1) return res.status(400).json({ error: 'limit must be a positive integer (max 500)' });
+    if (!Number.isFinite(offset) || offset < 0) return res.status(400).json({ error: 'offset must be a non-negative integer' });
+
+    const [responses, total] = await Promise.all([
+      metaSurveyService.queryMetaFlowResponses(db, { flowId, customerPhone, surveyId, source, from, to, limit, offset }),
+      metaSurveyService.countMetaFlowResponses(db, { flowId, customerPhone, surveyId }),
+    ]);
+
+    return res.status(200).json({ count: responses.length, total, limit, offset, responses });
+  } catch (e: any) {
+    console.error('GET /api/meta-survey/responses failed', e);
+    return res.status(500).json({ error: e.message || 'Failed to query responses' });
   }
 });
 
