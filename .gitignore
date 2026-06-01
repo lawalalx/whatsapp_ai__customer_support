@@ -11,6 +11,9 @@ MYREADME.md
 # .env
 dist.zip
 uploads/
+uploads
 deploy.zip
 scripts/
 META_TEMPLATES.md
+*.docx
+*.pdf
