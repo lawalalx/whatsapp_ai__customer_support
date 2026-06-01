@@ -100,8 +100,7 @@ RUN git clone https://github.com/pgvector/pgvector.git /tmp/pgvector && \
     rm -rf /tmp/pgvector
 
 # Setup Postgres user + data dir
-RUN mkdir -p /var/lib/postgresql/data && \
-    chown -R postgres:postgres /var/lib/postgresql
+RUN chown -R postgres:postgres /var/lib/postgresql
 
 # Set working directory
 WORKDIR /app
@@ -119,7 +118,6 @@ RUN pnpm build
 
 
 ENV POSTGRES_PASSWORD=postgres
-ENV PATH="/usr/lib/postgresql/13/bin:$PATH"
 
 # Expose app port
 EXPOSE 3000
@@ -127,9 +125,9 @@ EXPOSE 3000
 
 
 # Start BOTH Postgres + Node
-CMD su postgres -c "pg_ctl -D /var/lib/postgresql/data start" && \
+CMD service postgresql start && \
     echo "Waiting for PostgreSQL..." && \
-    until su postgres -c "pg_isready"; do sleep 2; done && \
+    sleep 5 && \
     su postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'postgres';\"" && \
     su postgres -c "psql -c \"CREATE EXTENSION IF NOT EXISTS vector;\"" && \
     pnpm start
