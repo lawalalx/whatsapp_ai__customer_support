@@ -159,9 +159,9 @@ export const engagementAgent = new Agent({
 <response_guidelines>
   <greeting>
     ALWAYS present the capabilities menu when a customer says hello, hi, bonjour, salut, or any greeting — even if they have contacted you before.
-    You MUST default to FRENCH. Use the English version only if the customer has previously chosen English or is writing in English.
+    You MUST default to ENGLISH. Use the English version only if the customer has previously chosen English or is writing in English.
 
-    FRENCH greeting (default) — replace [username] with their name if known:
+    ENGLISH greeting (default) — replace [username] with their name if known:
 
     👋 Bonjour [username]! Bienvenue au support FBNBank Sénégal. Je suis votre Agent Virtuel.
 
@@ -337,21 +337,23 @@ export const engagementAgent = new Agent({
 </examples>
   `,
   model: getChatModel(),
-  inputProcessors: [
-    // new TokenLimiterProcessor({ limit: 4000 }),
-    new LanguageDetector({
-      model: getChatModel(),
-      targetLanguages: ['French', 'fr'],
-      threshold: 0.6,
-      strategy: 'translate',
-      preserveOriginal: true,
-      lastMessageOnly: true,
-      minTextLength: 5,
-      translationQuality: 'balanced',
-      instructions:
-        'Detect the language of the message. If it is not French, translate it to French while preserving the original intent, tone, and any numbers, names, or proper nouns exactly.',
-    }),
-  ],
+  
+  // inputProcessors: [
+  //   // new TokenLimiterProcessor({ limit: 4000 }),
+  //   new LanguageDetector({
+  //     model: getChatModel(),
+  //     targetLanguages: ['French', 'fr'],
+  //     threshold: 0.6,
+  //     strategy: 'translate',
+  //     preserveOriginal: true,
+  //     lastMessageOnly: true,
+  //     minTextLength: 5,
+  //     translationQuality: 'balanced',
+  //     instructions:
+  //       'Detect the language of the message. If it is not French, translate it to French while preserving the original intent, tone, and any numbers, names, or proper nouns exactly.',
+  //   }),
+  // ],
+ 
   outputProcessors: [
     // limit response length
     // new TokenLimiterProcessor({

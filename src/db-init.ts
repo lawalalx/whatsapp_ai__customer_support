@@ -6,6 +6,29 @@
 // but we need custom tables for survey tracking.
 import pool from "./db/index.js";
 
+async function runMigration(client: any, id: string, sql: string) {
+  const exists = await client.query(
+    'SELECT 1 FROM schema_migrations WHERE id = $1 LIMIT 1',
+    [id]
+  );
+
+  if ((exists?.rowCount ?? 0) > 0) {
+    return false;
+  }
+
+  await client.query('BEGIN');
+  try {
+    await client.query(sql);
+    await client.query('INSERT INTO schema_migrations (id) VALUES ($1)', [id]);
+    await client.query('COMMIT');
+    console.log(`✅ Applied migration: ${id}`);
+    return true;
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw error;
+  }
+}
+
 export const initDatabase = async () => {
 
   try {
@@ -19,6 +42,14 @@ export const initDatabase = async () => {
     // ───────────────────────────────────────────────────────────
     await client.query(`
       CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+    `);
+
+    // Track one-time schema migrations for additive DB updates.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `);
 
     // ───────────────────────────────────────────────────────────
@@ -104,11 +135,85 @@ export const initDatabase = async () => {
           category        TEXT CHECK (category IN ('complaint','enquiry','request')),
           ticket_status   TEXT NOT NULL DEFAULT 'pending' CHECK (ticket_status IN ('pending','completed')),
           customer_phone  TEXT,
+          human_agent_active BOOLEAN NOT NULL DEFAULT FALSE,
+          human_engaged_at TIMESTAMPTZ,
 
           created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
       `);
+
+      await runMigration(
+        client,
+        '2026_06_01_escalations_human_handoff_columns',
+        `
+          ALTER TABLE escalations
+          ADD COLUMN IF NOT EXISTS human_agent_active BOOLEAN NOT NULL DEFAULT FALSE;
+
+          ALTER TABLE escalations
+          ADD COLUMN IF NOT EXISTS human_engaged_at TIMESTAMPTZ;
+
+          ALTER TABLE escalations
+          ADD COLUMN IF NOT EXISTS handoff_phone TEXT;
+        `
+      );
+
+      await runMigration(
+        client,
+        '2026_06_01_escalation_messages_table',
+        `
+          CREATE TABLE IF NOT EXISTS escalation_messages (
+            id SERIAL PRIMARY KEY,
+            ticket_id TEXT NOT NULL,
+            direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
+            message_text TEXT NOT NULL,
+            customer_phone TEXT,
+            source_message_id TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT fk_escalation_message_ticket
+              FOREIGN KEY (ticket_id)
+              REFERENCES escalations(ticket_id)
+              ON DELETE CASCADE
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_escalation_messages_ticket_created
+          ON escalation_messages (ticket_id, created_at DESC);
+
+          CREATE INDEX IF NOT EXISTS idx_escalation_messages_ticket_direction
+          ON escalation_messages (ticket_id, direction);
+        `
+      );
+
+      await runMigration(
+        client,
+        '2026_06_01_chat_history_table',
+        `
+          CREATE TABLE IF NOT EXISTS chat_history (
+            id SERIAL PRIMARY KEY,
+            thread_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('AI', 'Human', 'Customer')),
+            message_text TEXT NOT NULL,
+            escalation_id TEXT,
+            source_message_id TEXT,
+            channel TEXT NOT NULL DEFAULT 'whatsapp',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT fk_chat_history_escalation
+              FOREIGN KEY (escalation_id)
+              REFERENCES escalations(ticket_id)
+              ON DELETE SET NULL
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_chat_history_thread_created
+          ON chat_history (thread_id, created_at DESC);
+
+          CREATE INDEX IF NOT EXISTS idx_chat_history_role_created
+          ON chat_history (role, created_at DESC);
+
+          CREATE INDEX IF NOT EXISTS idx_chat_history_escalation_created
+          ON chat_history (escalation_id, created_at DESC);
+        `
+      );
 
       await client.query(`
         CREATE INDEX IF NOT EXISTS idx_escalations_ticket_status

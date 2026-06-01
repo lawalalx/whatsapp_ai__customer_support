@@ -2,6 +2,8 @@
 import { Pool } from 'pg';
 import { handleChatMessage } from "../handlers/chat.handler.js";
 import { handleSurveyMessage } from "../handlers/survey.handler.js";
+import escalationService from '../services/escalation-service.js';
+import chatHistoryService from '../services/chat-history-service.js';
 import { getActiveSurveySession } from "../services/session.service.js";
 
 
@@ -51,6 +53,50 @@ export async function routeIncomingMessage({
 }: RouteIncomingMessageParams) {
 
   console.log('Checking session for:', phone);
+  const normalizedPhone = normalizePhone(phone);
+  const activeEscalation = await escalationService.getLatestHumanOwnedEscalationByPhone(db, normalizedPhone);
+  const latestEscalation = activeEscalation ?? await escalationService.getLatestActiveEscalationByPhone(db, normalizedPhone);
+
+  const inboundText =
+    (typeof message?.text?.body === 'string' && message.text.body.trim()) ||
+    message?.interactive?.button_reply?.title ||
+    message?.interactive?.list_reply?.title ||
+    `[non-text message: ${message?.type || 'unknown'}]`;
+
+  try {
+    await chatHistoryService.logChatMessage({
+      db,
+      threadId: normalizedPhone,
+      role: 'Customer',
+      messageText: inboundText,
+      escalationId: latestEscalation?.ticket_id || null,
+      sourceMessageId: messageId,
+      metadata: {
+        messageType: message?.type || 'unknown',
+      },
+    });
+  } catch (error) {
+    console.error('Failed to log inbound customer chat message', error);
+  }
+
+  if (activeEscalation) {
+    try {
+      await escalationService.logEscalationMessage({
+        db,
+        ticketId: activeEscalation.ticket_id,
+        direction: 'inbound',
+        messageText: inboundText,
+        customerPhone: normalizedPhone,
+        sourceMessageId: messageId,
+      });
+    } catch (error) {
+      console.error('Failed to log inbound escalation message', error);
+    }
+
+    console.log('Human handoff is active for', normalizedPhone, '- suppressing automated reply while a human agent owns the conversation.');
+    return;
+  }
+
   // Prefer any previously-stored name (fallback persistence)
   if (!contactName && nameStore.has(String(phone))) {
     contactName = nameStore.get(String(phone)) as string;
@@ -77,7 +123,7 @@ export async function routeIncomingMessage({
     }
     return;
   }
-  const session = await getActiveSurveySession(db, normalizePhone(phone));
+  const session = await getActiveSurveySession(db, normalizedPhone);
 
   // Decide whether this incoming message should be handled by the survey flow.
   // Route to survey handler when:
@@ -157,7 +203,16 @@ export async function routeIncomingMessage({
       contactName,
       messageId,
       phoneNumberId,
-      sendMessage
+      sendMessage,
+      onAiReply: async (to: string, reply: string) => {
+        await chatHistoryService.logChatMessage({
+          db,
+          threadId: normalizePhone(String(to)),
+          role: 'AI',
+          messageText: reply,
+          escalationId: latestEscalation?.ticket_id || null,
+        });
+      },
     });
   }
 
@@ -174,6 +229,15 @@ export async function routeIncomingMessage({
       messageId,
       phoneNumberId,
       sendMessage,
+      onAiReply: async (to: string, reply: string) => {
+        await chatHistoryService.logChatMessage({
+          db,
+          threadId: normalizePhone(String(to)),
+          role: 'AI',
+          messageText: reply,
+          escalationId: latestEscalation?.ticket_id || null,
+        });
+      },
     });
   }
 }

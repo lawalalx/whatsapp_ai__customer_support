@@ -13,6 +13,7 @@ import { normalizePhone } from './utils/format_phone.js';
 import { sendWhatsAppMessage, sendWhatsAppSurvey, sendWhatsAppReadReceipt } from './whatsapp-client.js';
 import { lastOutboundType, setLastOutbound } from './utils/outboundTracker.js';
 import escalationService from './services/escalation-service.js';
+import chatHistoryService from './services/chat-history-service.js';
 import { initDatabase } from './db-init.js';
 // WhatsApp Webhook: Handle incoming messages
 import { routeIncomingMessage } from './webhook/router.js';
@@ -119,6 +120,16 @@ const swaggerDocument = {
       description: "The URL for viewing and testing the API locally or remotely depending on environment configuration",
     },
   ],
+  tags: [
+    { name: 'Webhook', description: 'WhatsApp webhook verification and inbound events' },
+    { name: 'CRM', description: 'CRM-triggered survey and campaign endpoints' },
+    { name: 'Admin - Survey', description: 'Survey template and survey dataset management' },
+    { name: 'Admin - Escalation', description: 'Human handoff and escalation operations' },
+    { name: 'Admin - Chat History', description: 'Thread and message history retrieval endpoints' },
+    { name: 'Knowledge Base', description: 'Knowledge base document ingest and management' },
+    { name: 'Agent', description: 'Agent testing endpoint' },
+    { name: 'Health', description: 'Liveness endpoint' },
+  ],
   components: {
     schemas: {
       SurveyQuestion: {
@@ -144,9 +155,10 @@ const swaggerDocument = {
   },
 
   paths: {
-  '/webhook': {
+  '/webhook/whatsapp': {
     post: {
       summary: 'Receive WhatsApp webhook events',
+      tags: ['Webhook'],
       description: `
       Handles incoming events from the WhatsApp Business API, including:
       - User messages (text, button clicks)
@@ -177,6 +189,7 @@ const swaggerDocument = {
   '/api/crm/send-survey': {
     post: {
       summary: 'Send a survey to a single customer',
+      tags: ['CRM'],
       description: `
       Triggers a Mastra workflow to send a survey via WhatsApp.
 
@@ -242,6 +255,7 @@ const swaggerDocument = {
   '/api/crm/bulk-send-survey': {
     post: {
     summary: 'Send surveys to multiple customers',
+    tags: ['CRM'],
     description: `
     Triggers survey workflows for multiple customers in a single request.
 
@@ -348,6 +362,7 @@ const swaggerDocument = {
   '/api/crm/create-meta-flow': {
     post: {
       summary: 'Create and publish Meta (WhatsApp) flow',
+      tags: ['CRM'],
       description: `
         Creates and publishes a WhatsApp interactive flow using Meta APIs.
 
@@ -367,6 +382,7 @@ const swaggerDocument = {
   '/api/crm/survey-responses': {
     get: {
       summary: 'Retrieve survey responses',
+      tags: ['CRM'],
       description: `
       Fetches stored survey responses from the database.
 
@@ -420,6 +436,7 @@ const swaggerDocument = {
   '/api/crm/meta-survey-responses': {
     get: {
       summary: 'Meta survey responses (placeholder)',
+      tags: ['CRM'],
       description: `
       Placeholder endpoint for retrieving responses from Meta-hosted survey flows.
 
@@ -434,6 +451,7 @@ const swaggerDocument = {
   '/admin/survey': {
     post: {
       summary: 'Create and store a manual survey template',
+      tags: ['Admin - Survey'],
       description: `
       Creates a reusable survey template and stores it locally as a JSON file.
 
@@ -464,6 +482,7 @@ const swaggerDocument = {
   '/admin/survey/{surveyId}/participants': {
     get: {
       summary: 'Get survey participants',
+      tags: ['Admin - Survey'],
       description: `
       Returns a list of unique customer phone numbers who have participated in a given survey.
 
@@ -520,6 +539,7 @@ const swaggerDocument = {
   '/admin/survey/{surveyId}/file': {
     delete: {
       summary: 'Delete survey template file',
+      tags: ['Admin - Survey'],
       description: `
       Deletes a locally stored survey template JSON file from the data directory.
 
@@ -544,6 +564,7 @@ const swaggerDocument = {
   '/admin/survey/{surveyId}': {
     delete: {
       summary: 'Delete survey (data + sessions)',
+      tags: ['Admin - Survey'],
       description: `
       Deletes all data associated with a survey, including:
       - Survey responses
@@ -573,6 +594,7 @@ const swaggerDocument = {
   '/admin/escalations': {
     get: {
       summary: 'Get escalations',
+      tags: ['Admin - Escalation'],
       description: `
       Returns a list of escalations (human handoff / tickets) from the database.
 
@@ -606,6 +628,9 @@ const swaggerDocument = {
                     category: { type: 'string', enum: ['complaint','enquiry','request'] },
                     ticket_status: { type: 'string', enum: ['pending','completed'] },
                     customer_phone: { type: 'string' },
+                    human_agent_active: { type: 'boolean' },
+                    handoff_phone: { type: 'string', nullable: true },
+                    human_engaged_at: { type: 'string', format: 'date-time', nullable: true },
                     created_at: { type: 'string', format: 'date-time' },
                     updated_at: { type: 'string', format: 'date-time' }
                   }
@@ -621,8 +646,9 @@ const swaggerDocument = {
   '/admin/escalation/{ticketId}/resolve': {
     post: {
       summary: 'Resolve escalation',
+      tags: ['Admin - Escalation'],
       description: `
-      Marks an escalation (human handoff / ticket) as resolved in the database.
+      Marks an escalation (human handoff / ticket) as completed in the database.
 
       Useful for:
       - Closing completed tickets
@@ -646,8 +672,9 @@ const swaggerDocument = {
               properties: {
                 ticketStatus: {
                   type: 'string',
-                  example: 'resolved',
-                  description: 'Status to set (default: resolved)'
+                  enum: ['pending', 'completed'],
+                  example: 'completed',
+                  description: 'Status to set (default: completed)'
                 },
                 to: {
                   type: 'string',
@@ -673,14 +700,241 @@ const swaggerDocument = {
       }
     }
   },
+
+  '/admin/escalation/{ticketId}/message': {
+    post: {
+      summary: 'Send human agent message',
+      tags: ['Admin - Escalation'],
+      description: `
+      Sends a WhatsApp message to the customer for an active escalation.
+
+      Useful for:
+      - Letting a human agent claim and continue a conversation after AI handoff
+      - Replying from a backend or supervisor console using the ticket created during escalation
+
+      The first human message automatically marks the ticket as human-owned,
+      so the bot stops replying only after a human agent has actually engaged.
+      `,
+      parameters: [
+        {
+          name: 'ticketId',
+          in: 'path',
+          required: true,
+          schema: { type: 'string' }
+        }
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['message'],
+              properties: {
+                message: {
+                  type: 'string',
+                  example: 'Hello, this is Ada from FBNBank support. I am now handling your request.',
+                  description: 'Message that the human agent wants to send to the customer'
+                },
+                to: {
+                  type: 'string',
+                  example: '+221770000000',
+                  description: 'Optional override for the customer phone number; defaults to the number stored on the ticket'
+                }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        '200': { description: 'Human agent message sent successfully' },
+        '400': { description: 'Invalid request payload' },
+        '404': { description: 'Escalation not found' },
+        '409': { description: 'Escalation is no longer active' },
+        '502': { description: 'WhatsApp delivery failed' },
+        '500': { description: 'Failed to send human agent message' }
+      }
+    }
+  },
+  '/admin/escalation/message': {
+    post: {
+      summary: 'Send spontaneous human message(s)',
+      tags: ['Admin - Escalation'],
+      description: `
+      Sends a spontaneous human-originated WhatsApp message without requiring a ticket or thread id.
+
+      Useful for:
+      - Proactive outreach from support operations
+      - Sending one-off updates to multiple customers directly
+
+      This endpoint accepts a list of customer numbers and sends the same message to each number.
+      `,
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['message', 'to'],
+              properties: {
+                message: {
+                  type: 'string',
+                  example: 'Hello, this is FBNBank support with an important update.',
+                  description: 'Message content to send to all recipients'
+                },
+                to: {
+                  type: 'array',
+                  minItems: 1,
+                  items: { type: 'string' },
+                  example: ['+221770000000', '+2349013360717'],
+                  description: 'List of customer phone numbers'
+                }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        '200': { description: 'Message sent to at least one recipient' },
+        '400': { description: 'Invalid request payload' },
+        '502': { description: 'Message delivery failed for all recipients' },
+        '500': { description: 'Failed to send spontaneous human agent message' }
+      }
+    }
+  },
+  '/admin/escalation/{ticketId}/messages': {
+    get: {
+      summary: 'Get escalation messages',
+      tags: ['Admin - Escalation'],
+      description: `
+      Returns inbound and outbound messages linked to an escalation ticket.
+
+      Useful for:
+      - Letting backend human-support consoles fetch customer replies during handoff
+      - Auditing the human-agent conversation trail for a ticket
+      `,
+      parameters: [
+        {
+          name: 'ticketId',
+          in: 'path',
+          required: true,
+          schema: { type: 'string' }
+        },
+        {
+          name: 'direction',
+          in: 'query',
+          required: false,
+          schema: { type: 'string', enum: ['inbound', 'outbound'] },
+          description: 'Optional direction filter'
+        },
+        {
+          name: 'limit',
+          in: 'query',
+          required: false,
+          schema: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+          description: 'Maximum number of messages to return'
+        }
+      ],
+      responses: {
+        '200': { description: 'Escalation messages retrieved successfully' },
+        '400': { description: 'Invalid request query parameters' },
+        '404': { description: 'Escalation not found' },
+        '500': { description: 'Failed to fetch escalation messages' }
+      }
+    }
+  },
+  '/admin/escalation/{ticketId}/release': {
+    post: {
+      summary: 'Release human handoff',
+      tags: ['Admin - Escalation'],
+      description: `
+      Returns control of a pending escalation back to the AI without closing the ticket.
+
+      Useful for:
+      - Handing the conversation back to the bot when the human agent is done for now
+      - Avoiding clashes when a human agent cannot continue immediately
+      `,
+      parameters: [
+        {
+          name: 'ticketId',
+          in: 'path',
+          required: true,
+          schema: { type: 'string' }
+        }
+      ],
+      responses: {
+        '200': { description: 'Human handoff released successfully' },
+        '404': { description: 'Escalation not found' },
+        '409': { description: 'Escalation is already completed' },
+        '500': { description: 'Failed to release human handoff' }
+      }
+    }
+  },
+  '/admin/chat-history/messages': {
+    get: {
+      summary: 'Get detailed chat history',
+      tags: ['Admin - Chat History'],
+      description: `
+      Returns detailed chat history records across Customer, AI, and Human roles.
+
+      Filters supported:
+      - threadId (phone/thread)
+      - role (AI, Human, Customer)
+      - escalationId
+      - from/to datetime range
+      - limit/offset pagination
+      `,
+      parameters: [
+        { name: 'threadId', in: 'query', required: false, schema: { type: 'string' }, description: 'Phone/thread id to filter by' },
+        { name: 'role', in: 'query', required: false, schema: { type: 'string', enum: ['AI', 'Human', 'Customer'] }, description: 'Message role filter' },
+        { name: 'escalationId', in: 'query', required: false, schema: { type: 'string' }, description: 'Escalation ticket id filter' },
+        { name: 'from', in: 'query', required: false, schema: { type: 'string', format: 'date-time' }, description: 'Include records from this timestamp' },
+        { name: 'to', in: 'query', required: false, schema: { type: 'string', format: 'date-time' }, description: 'Include records up to this timestamp' },
+        { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 500, default: 50 }, description: 'Maximum number of messages to return' },
+        { name: 'offset', in: 'query', required: false, schema: { type: 'integer', minimum: 0, default: 0 }, description: 'Pagination offset' }
+      ],
+      responses: {
+        '200': { description: 'Detailed chat history fetched successfully' },
+        '400': { description: 'Invalid query parameters' },
+        '500': { description: 'Failed to fetch chat history messages' }
+      }
+    }
+  },
+  '/admin/chat-history/threads': {
+    get: {
+      summary: 'Get chat history threads summary',
+      tags: ['Admin - Chat History'],
+      description: `
+      Returns thread-level chat history summary with role counts and timestamps.
+
+      Useful for dashboards, inbox views, and selecting active customer conversations.
+      Supports the same filters as detailed history.
+      `,
+      parameters: [
+        { name: 'threadId', in: 'query', required: false, schema: { type: 'string' }, description: 'Phone/thread id to filter by' },
+        { name: 'role', in: 'query', required: false, schema: { type: 'string', enum: ['AI', 'Human', 'Customer'] }, description: 'Filter threads having this role in range' },
+        { name: 'escalationId', in: 'query', required: false, schema: { type: 'string' }, description: 'Escalation ticket id filter' },
+        { name: 'from', in: 'query', required: false, schema: { type: 'string', format: 'date-time' }, description: 'Include records from this timestamp' },
+        { name: 'to', in: 'query', required: false, schema: { type: 'string', format: 'date-time' }, description: 'Include records up to this timestamp' },
+        { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 500, default: 50 }, description: 'Maximum number of thread summaries to return' },
+        { name: 'offset', in: 'query', required: false, schema: { type: 'integer', minimum: 0, default: 0 }, description: 'Pagination offset' }
+      ],
+      responses: {
+        '200': { description: 'Thread summaries fetched successfully' },
+        '400': { description: 'Invalid query parameters' },
+        '500': { description: 'Failed to fetch chat history threads' }
+      }
+    }
+  },
   '/admin/escalation/{ticketId}': {
     delete: {
       summary: 'Delete escalation',
+      tags: ['Admin - Escalation'],
       description: `
       Deletes an escalation (human handoff / ticket) from the database.
 
       Useful for:
-      - Removing resolved/completed tickets
+      - Removing completed tickets
       - Cleaning up old escalations
       `,
       parameters: [
@@ -745,6 +999,7 @@ const swaggerDocument = {
   '/api/kb/upload': {
     post: {
       summary: 'Upload document(s) to knowledge base',
+      tags: ['Knowledge Base'],
       description: 'Uploads one or more files (PDF, TXT, CSV, DOCX, DOC, XLSX, XLS) or raw text to the knowledge base. Each document is chunked, embedded, and stored in the vector index.',
       requestBody: {
         required: true,
@@ -772,6 +1027,7 @@ const swaggerDocument = {
   '/api/kb/docs': {
     get: {
       summary: 'List all knowledge base documents',
+      tags: ['Knowledge Base'],
       description: 'Returns metadata for all documents currently in the knowledge base index.',
       responses: {
         '200': {
@@ -806,6 +1062,7 @@ const swaggerDocument = {
   '/api/kb/docs/{docId}': {
     get: {
       summary: 'Get knowledge base document by ID',
+      tags: ['Knowledge Base'],
       parameters: [{ name: 'docId', in: 'path', required: true, schema: { type: 'string' } }],
       responses: {
         '200': { description: 'Document metadata' },
@@ -814,6 +1071,7 @@ const swaggerDocument = {
     },
     delete: {
       summary: 'Delete a document from the knowledge base',
+      tags: ['Knowledge Base'],
       description: 'Removes the document vectors, the uploaded file, and the metadata record.',
       parameters: [{ name: 'docId', in: 'path', required: true, schema: { type: 'string' } }],
       responses: {
@@ -864,7 +1122,7 @@ app.use('/api-docs', (swaggerUi.serve as any), (swaggerUi.setup(swaggerDocument)
 
 
 // WhatsApp Webhook: Verification
-app.get('/webhook', (req: Request, res: Response) => {
+app.get('/webhook/whatsapp', (req: Request, res: Response) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
@@ -882,7 +1140,7 @@ app.get('/webhook', (req: Request, res: Response) => {
 
 
 
-app.post('/webhook', async (req: Request, res: Response) => {
+app.post('/webhook/whatsapp', async (req: Request, res: Response) => {
   const body = req.body;
 
   try {
@@ -950,6 +1208,20 @@ app.post('/webhook', async (req: Request, res: Response) => {
         // mark last outbound as chat
         setLastOutbound(String(to), 'chat');
         await sendWhatsAppMessage({ to, message: msg, phoneNumberId });
+
+        try {
+          const threadId = normalizePhone(String(to));
+          const pendingEscalation = await escalationService.getLatestActiveEscalationByPhone(db, threadId);
+          await chatHistoryService.logChatMessage({
+            db,
+            threadId,
+            role: 'AI',
+            messageText: msg,
+            escalationId: pendingEscalation?.ticket_id || null,
+          });
+        } catch (err) {
+          console.error('Failed to log outbound AI chat message', err);
+        }
       },
 
       sendQuestion: async (to: string, question: any, session: any) => {
@@ -1157,6 +1429,358 @@ app.get('/admin/escalations', async (req: Request, res: Response) => {
 });
 
 
+app.post('/admin/escalation/:ticketId/message', async (req: Request, res: Response) => {
+  try {
+    const rawTicketId = req.params.ticketId;
+    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
+
+    if (!ticketId) {
+      return res.status(400).json({ error: 'ticketId is required' });
+    }
+
+    const parse = z.object({
+      message: z.string().trim().min(1),
+      to: z.string().trim().optional(),
+    }).safeParse(req.body || {});
+
+    if (!parse.success) {
+      return res.status(400).json({ error: 'validation_failed', details: parse.error.format() });
+    }
+
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) {
+      return res.status(500).json({ error: 'DB not initialized' });
+    }
+
+    const result = await escalationService.sendHumanAgentMessage({
+      db,
+      ticketId,
+      message: parse.data.message,
+      to: parse.data.to,
+      sendMessage: async (to: string, message: string) => sendWhatsAppMessage({ to, message }),
+    });
+
+    if (!result.sent) {
+      return res.status(502).json({
+        error: 'Failed to deliver human agent message to WhatsApp',
+        ticketId,
+        to: result.to,
+      });
+    }
+
+    try {
+      await chatHistoryService.logChatMessage({
+        db,
+        threadId: result.to,
+        role: 'Human',
+        messageText: parse.data.message,
+        escalationId: ticketId,
+      });
+    } catch (error) {
+      console.error('Failed to log outbound human chat message', error);
+    }
+
+    return res.status(200).json({
+      success: true,
+      ...result,
+    });
+  } catch (err: any) {
+    if (err.message === 'message is required' || err.message === 'customer_phone (to) is required') {
+      return res.status(400).json({ error: err.message });
+    }
+
+    if (err.message === 'not_found') {
+      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
+    }
+
+    if (err.message === 'ticket_not_active') {
+      return res.status(409).json({ error: 'Only pending escalations can receive human agent messages' });
+    }
+
+    console.error('Failed to send human agent message', err);
+    return res.status(500).json({ error: 'Failed to send human agent message' });
+  }
+});
+
+app.post('/admin/escalation/message', async (req: Request, res: Response) => {
+  try {
+    const parse = z.object({
+      message: z.string().trim().min(1),
+      to: z.array(z.string().trim().min(1)).min(1),
+    }).safeParse(req.body || {});
+
+    if (!parse.success) {
+      return res.status(400).json({ error: 'validation_failed', details: parse.error.format() });
+    }
+
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) {
+      return res.status(500).json({ error: 'DB not initialized' });
+    }
+
+    const recipients = Array.from(new Set(parse.data.to.map((n) => normalizePhone(n)).filter(Boolean)));
+    if (recipients.length === 0) {
+      return res.status(400).json({ error: 'to must contain at least one valid phone number' });
+    }
+
+    const results = await Promise.all(
+      recipients.map(async (to) => {
+        const sent = await sendWhatsAppMessage({ to, message: parse.data.message });
+
+        if (sent) {
+          try {
+            await chatHistoryService.logChatMessage({
+              db,
+              threadId: to,
+              role: 'Human',
+              messageText: parse.data.message,
+              escalationId: null,
+            });
+          } catch (error) {
+            console.error('Failed to log spontaneous outbound human chat message', error);
+          }
+        }
+
+        return { to, sent };
+      })
+    );
+
+    const sentCount = results.filter((r) => r.sent).length;
+    const failedCount = results.length - sentCount;
+
+    if (sentCount === 0) {
+      return res.status(502).json({
+        error: 'Failed to deliver message to all recipients',
+        summary: { total: results.length, sentCount, failedCount },
+        results,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      summary: { total: results.length, sentCount, failedCount },
+      results,
+    });
+  } catch (err) {
+    console.error('Failed to send spontaneous human agent message', err);
+    return res.status(500).json({ error: 'Failed to send spontaneous human agent message' });
+  }
+});
+
+app.get('/admin/chat-history/messages', async (req: Request, res: Response) => {
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) {
+      return res.status(500).json({ error: 'DB not initialized' });
+    }
+
+    const threadId = typeof req.query.threadId === 'string' ? req.query.threadId.trim() : undefined;
+    const role = typeof req.query.role === 'string' ? req.query.role.trim() as 'AI' | 'Human' | 'Customer' : undefined;
+    const escalationId = typeof req.query.escalationId === 'string' ? req.query.escalationId.trim() : undefined;
+    const from = typeof req.query.from === 'string' ? req.query.from.trim() : undefined;
+    const to = typeof req.query.to === 'string' ? req.query.to.trim() : undefined;
+    const limit = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : 50;
+    const offset = typeof req.query.offset === 'string' ? Number.parseInt(req.query.offset, 10) : 0;
+
+    if (role && !['AI', 'Human', 'Customer'].includes(role)) {
+      return res.status(400).json({ error: 'role must be one of: AI, Human, Customer' });
+    }
+
+    if (!Number.isFinite(limit) || limit < 1 || limit > 500) {
+      return res.status(400).json({ error: 'limit must be an integer between 1 and 500' });
+    }
+
+    if (!Number.isFinite(offset) || offset < 0) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+
+    const messages = await chatHistoryService.getChatHistory(db, {
+      threadId,
+      role,
+      escalationId,
+      from,
+      to,
+      limit,
+      offset,
+    });
+
+    return res.status(200).json({
+      filters: {
+        threadId: threadId || null,
+        role: role || null,
+        escalationId: escalationId || null,
+        from: from || null,
+        to: to || null,
+        limit,
+        offset,
+      },
+      count: messages.length,
+      messages,
+    });
+  } catch (e: any) {
+    if (e.message === 'Invalid role') {
+      return res.status(400).json({ error: 'role must be one of: AI, Human, Customer' });
+    }
+    console.error('Failed to fetch chat history messages', e);
+    return res.status(500).json({ error: 'Failed to fetch chat history messages' });
+  }
+});
+
+app.get('/admin/chat-history/threads', async (req: Request, res: Response) => {
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) {
+      return res.status(500).json({ error: 'DB not initialized' });
+    }
+
+    const threadId = typeof req.query.threadId === 'string' ? req.query.threadId.trim() : undefined;
+    const role = typeof req.query.role === 'string' ? req.query.role.trim() as 'AI' | 'Human' | 'Customer' : undefined;
+    const escalationId = typeof req.query.escalationId === 'string' ? req.query.escalationId.trim() : undefined;
+    const from = typeof req.query.from === 'string' ? req.query.from.trim() : undefined;
+    const to = typeof req.query.to === 'string' ? req.query.to.trim() : undefined;
+    const limit = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : 50;
+    const offset = typeof req.query.offset === 'string' ? Number.parseInt(req.query.offset, 10) : 0;
+
+    if (role && !['AI', 'Human', 'Customer'].includes(role)) {
+      return res.status(400).json({ error: 'role must be one of: AI, Human, Customer' });
+    }
+
+    if (!Number.isFinite(limit) || limit < 1 || limit > 500) {
+      return res.status(400).json({ error: 'limit must be an integer between 1 and 500' });
+    }
+
+    if (!Number.isFinite(offset) || offset < 0) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+
+    const threads = await chatHistoryService.getChatHistoryThreads(db, {
+      threadId,
+      role,
+      escalationId,
+      from,
+      to,
+      limit,
+      offset,
+    });
+
+    return res.status(200).json({
+      filters: {
+        threadId: threadId || null,
+        role: role || null,
+        escalationId: escalationId || null,
+        from: from || null,
+        to: to || null,
+        limit,
+        offset,
+      },
+      count: threads.length,
+      threads,
+    });
+  } catch (e: any) {
+    if (e.message === 'Invalid role') {
+      return res.status(400).json({ error: 'role must be one of: AI, Human, Customer' });
+    }
+    console.error('Failed to fetch chat history threads', e);
+    return res.status(500).json({ error: 'Failed to fetch chat history threads' });
+  }
+});
+
+app.post('/admin/escalation/:ticketId/release', async (req: Request, res: Response) => {
+  try {
+    const rawTicketId = req.params.ticketId;
+    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
+
+    if (!ticketId) {
+      return res.status(400).json({ error: 'ticketId is required' });
+    }
+
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) {
+      return res.status(500).json({ error: 'DB not initialized' });
+    }
+
+    const ticket = await escalationService.getEscalationByTicketId(db, ticketId);
+    if (!ticket) {
+      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
+    }
+
+    if (ticket.ticket_status !== 'pending') {
+      return res.status(409).json({ error: 'Only pending escalations can be released back to the bot' });
+    }
+
+    const updated = await escalationService.setHumanAgentActive(db, ticketId, false);
+    if (!updated) {
+      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      ticketId,
+      ticketStatus: updated.ticket_status,
+      humanAgentActive: updated.human_agent_active,
+    });
+  } catch (e) {
+    console.error('Failed to release human handoff', e);
+    return res.status(500).json({ error: 'Failed to release human handoff' });
+  }
+});
+
+app.get('/admin/escalation/:ticketId/messages', async (req: Request, res: Response) => {
+  try {
+    const rawTicketId = req.params.ticketId;
+    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
+    const directionRaw = req.query.direction;
+    const limitRaw = req.query.limit;
+
+    if (!ticketId) {
+      return res.status(400).json({ error: 'ticketId is required' });
+    }
+
+    const direction = typeof directionRaw === 'string' ? directionRaw.trim().toLowerCase() : undefined;
+    if (direction && !['inbound', 'outbound'].includes(direction)) {
+      return res.status(400).json({ error: 'direction must be one of: inbound, outbound' });
+    }
+
+    const limit = typeof limitRaw === 'string' ? Number.parseInt(limitRaw, 10) : 50;
+    if (!Number.isFinite(limit) || limit < 1 || limit > 200) {
+      return res.status(400).json({ error: 'limit must be an integer between 1 and 200' });
+    }
+
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) {
+      return res.status(500).json({ error: 'DB not initialized' });
+    }
+
+    const ticket = await escalationService.getEscalationByTicketId(db, ticketId);
+    if (!ticket) {
+      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
+    }
+
+    const messages = await escalationService.getEscalationMessages(
+      db,
+      ticketId,
+      direction as 'inbound' | 'outbound' | undefined,
+      limit
+    );
+
+    return res.status(200).json({
+      ticketId,
+      count: messages.length,
+      messages,
+    });
+  } catch (e) {
+    console.error('Failed to fetch escalation messages', e);
+    return res.status(500).json({ error: 'Failed to fetch escalation messages' });
+  }
+});
+
+
 // body: { ticketId?: string, ticketStatus?: 'pending'|'completed', to?: string, message?: string }
 app.post('/admin/escalation/:ticketId/resolve', async (req: Request, res: Response) => {
   try {
@@ -1180,7 +1804,7 @@ app.post('/admin/escalation/:ticketId/resolve', async (req: Request, res: Respon
       const result = await escalationService.notifyAndMaybeUpdate({
         db,
         ticketId,
-        ticketStatus: ticketStatus || 'resolved', // default
+        ticketStatus: ticketStatus || 'completed',
         to,
         message,
         sendMessage: async (t: string, m: string) =>
@@ -1190,11 +1814,17 @@ app.post('/admin/escalation/:ticketId/resolve', async (req: Request, res: Respon
       return res.status(200).json({
         success: true,
         ticketId,
-        status: ticketStatus || 'resolved',
+        status: ticketStatus || 'completed',
         ...result,
       });
 
     } catch (err: any) {
+      if (err.message === 'Invalid ticketStatus') {
+        return res.status(400).json({
+          error: 'Invalid ticketStatus. Allowed values: pending, completed',
+        });
+      }
+
       if (err.message === 'customer_phone (to) is required') {
         return res.status(400).json({
           error: 'customer_phone (to) is required or not found for ticketId',
@@ -1234,7 +1864,7 @@ app.delete('/admin/escalation/:ticketId', async (req: Request, res: Response) =>
 
     // Optional safety: only allow deleting resolved tickets
     const existing = await db.query(
-      'SELECT id, status FROM escalations WHERE id = $1',
+      'SELECT ticket_id, ticket_status FROM escalations WHERE ticket_id = $1',
       [ticketId]
     );
 
@@ -1244,14 +1874,14 @@ app.delete('/admin/escalation/:ticketId', async (req: Request, res: Response) =>
 
     const escalation = existing.rows[0];
 
-    if (escalation.status !== 'resolved' && escalation.status !== 'completed') {
+    if (escalation.ticket_status !== 'completed') {
       return res.status(400).json({
-        error: 'Only resolved/completed escalations can be deleted',
+        error: 'Only completed escalations can be deleted',
       });
     }
 
     // 🧨 Actual delete
-    await db.query('DELETE FROM escalations WHERE id = $1', [ticketId]);
+    await db.query('DELETE FROM escalations WHERE ticket_id = $1', [ticketId]);
 
     return res.status(200).json({
       success: true,

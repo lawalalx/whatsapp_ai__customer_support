@@ -12,6 +12,7 @@ export async function handleChatMessage({
   messageId,
   phoneNumberId,
   sendMessage,
+  onAiReply,
 }: {
   mastra: any;
   phone: string;
@@ -20,6 +21,7 @@ export async function handleChatMessage({
   messageId: string;
   phoneNumberId?: string;
   sendMessage: (to: string, msg: string) => Promise<void>;
+  onAiReply?: (to: string, msg: string) => Promise<void>;
 }) {
   try {
     console.log('Chat handler triggered for', phone, 'with text:', text);
@@ -58,6 +60,11 @@ export async function handleChatMessage({
         const rawReply = response?.text?.trim() || "Sorry, I couldn't process that. Please try again.";
         console.log('Sending WhatsApp message to', phone, 'with raw reply:', rawReply);
         await sendAgentReply(phone, rawReply, phoneNumberId);
+        if (onAiReply) {
+          await onAiReply(phone, rawReply).catch(err => {
+            console.error('Failed to log AI reply', err);
+          });
+        }
         return;
       } finally {
         clearInterval(intervalId);
@@ -81,6 +88,11 @@ export async function handleChatMessage({
     const rawReply = response?.text?.trim() || "Sorry, I couldn't process that. Please try again.";
     console.log('Sending WhatsApp message to', phone, 'with raw reply:', rawReply);
     await sendAgentReply(phone, rawReply, phoneNumberId);
+    if (onAiReply) {
+      await onAiReply(phone, rawReply).catch(err => {
+        console.error('Failed to log AI reply', err);
+      });
+    }
   } catch (error) {
     console.error('❌ Chat handler error:', error);
 
