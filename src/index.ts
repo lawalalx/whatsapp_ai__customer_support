@@ -130,7 +130,7 @@ const swaggerDocument = {
   },
   servers: [
     {
-      url: "/",
+      url: URL,
       description: "The URL for viewing and testing the API locally or remotely depending on environment configuration",
     },
   ],
