@@ -126,6 +126,10 @@ EXPOSE 3000
 ENV POSTGRES_PASSWORD=postgres
 
 # Start BOTH Postgres + Node
-CMD service postgresql start && \
-    su postgres -c "psql -c 'CREATE EXTENSION IF NOT EXISTS vector;'" || true && \
+CMD su postgres -c "pg_ctl -D /var/lib/postgresql/data start" && \
+    echo "Waiting for PostgreSQL..." && \
+    until su postgres -c "pg_isready"; do sleep 2; done && \
+    su postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'postgres';\"" && \
+    su postgres -c "psql -c \"CREATE EXTENSION IF NOT EXISTS vector;\"" && \
+    echo "Starting app..." && \
     pnpm start
