@@ -117,13 +117,14 @@ COPY . .
 
 RUN pnpm build
 
-# Copy init script
-COPY init.sql /docker-entrypoint-initdb.d/init.sql
+
+ENV POSTGRES_PASSWORD=postgres
+ENV PATH="/usr/lib/postgresql/13/bin:$PATH"
 
 # Expose app port
 EXPOSE 3000
 
-ENV POSTGRES_PASSWORD=postgres
+
 
 # Start BOTH Postgres + Node
 CMD su postgres -c "pg_ctl -D /var/lib/postgresql/data start" && \
@@ -131,5 +132,4 @@ CMD su postgres -c "pg_ctl -D /var/lib/postgresql/data start" && \
     until su postgres -c "pg_isready"; do sleep 2; done && \
     su postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'postgres';\"" && \
     su postgres -c "psql -c \"CREATE EXTENSION IF NOT EXISTS vector;\"" && \
-    echo "Starting app..." && \
     pnpm start
