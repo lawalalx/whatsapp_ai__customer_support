@@ -68,7 +68,7 @@ const routes = [
         return c.json({ error: "Missing required fields (to, surveyId, topic, mode)" }, 400);
       }
 
-      const { to, surveyId, topic, mode, context } = body;
+      const { to, surveyId, topic, mode, context, surveyIntroTemplateId } = body;
 
       // Only allow valid modes
       if (!['ai', 'manual', 'meta'].includes(mode)) {
@@ -89,7 +89,14 @@ const routes = [
         const run = await workflow.createRun();
 
         // Pass context if present (type-safe)
-        const inputData = { to, surveyId, topic, ...(context ? { context } : {}), mode };
+        const inputData = {
+          to,
+          surveyId,
+          topic,
+          ...(context ? { context } : {}),
+          ...(surveyIntroTemplateId ? { surveyIntroTemplateId } : {}),
+          mode,
+        };
         const result = await run.start({ inputData });
         return c.json({ success: true, mode, result });
       } catch (error) {

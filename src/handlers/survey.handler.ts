@@ -3,6 +3,7 @@
 import { Pool } from "pg";
 import { saveSurveyResponse } from "../services/response.service.js";
 import { completeSession, updateSessionProgress } from "../services/session.service.js";
+import { getSurveyResponsesBySession } from "../services/response.service.js";
 
 
 type HandleSurveyMessageParams = {
@@ -66,6 +67,35 @@ export async function handleSurveyMessage({
   }
 
   const currentIndex = session.current_question
+  if (currentIndex === -1) {
+    const proceedPressed = normalizeForMatch(rawAnswer) === 'proceed' || normalizeForMatch(buttonReply?.title || listReply?.title) === 'proceed';
+    if (!proceedPressed) {
+      await sendMessage(phone, 'Please tap Proceed to start the survey.')
+      return
+    }
+
+    let questions = session.questions_data
+    if (typeof questions === 'string') {
+      try {
+        questions = JSON.parse(questions)
+      } catch (e) {
+        // keep original; downstream checks will handle invalid shape
+      }
+    }
+
+    const firstQuestion = Array.isArray(questions) ? questions[0] : undefined;
+    if (!firstQuestion) {
+      await completeSession(db, session.id)
+      await sendMessage(phone, '🎉 Thanks! Survey completed.')
+      return
+    }
+
+    await updateSessionProgress(db, session.id, 0)
+    session.current_question = 0
+    await sendQuestion(phone, firstQuestion, session)
+    return
+  }
+
   // Normalize questions_data (DB may return JSON string or JSONB)
   let questions = session.questions_data
   if (typeof questions === 'string') {
@@ -144,7 +174,19 @@ export async function handleSurveyMessage({
   if (nextIndex >= questions.length) {
     await completeSession(db, session.id)
 
-    await sendMessage(phone, "🎉 Thanks! Survey completed.")
+    const responses = await getSurveyResponsesBySession(db, session.id)
+    const recapLines = responses.length > 0
+      ? responses.map((response, index) => {
+        const questionLabel = response.question_text || `Question ${index + 1}`;
+        const answerLabel = response.response_text || 'No response recorded';
+        return `*${questionLabel}*\n${answerLabel}`;
+      }).join('\n\n')
+      : 'No responses were recorded.';
+
+    await sendMessage(
+      phone,
+      `🎉 Thanks! Survey completed.\n\nThis is what we received:\n\n${recapLines}`
+    )
     return
   }
 

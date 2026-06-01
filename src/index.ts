@@ -61,7 +61,7 @@ const PORT =
     : Number(process.env.PORT || 3000);
 
 
-const URL=  process.env.LOCAL_URL
+const URL=  process.env.REMOTE_URL
 
 app.use(express.json());
 
@@ -223,18 +223,22 @@ const swaggerDocument = {
                   enum: ['ai', 'manual', 'meta'],
                   description: '**ai** — AI-generated questions | **manual** — predefined template | **meta** — approved WhatsApp template'
                 },
-                context: { type: 'string', description: 'Optional AI context for personalization' }
+                context: { type: 'string', description: 'Optional AI context for personalization' },
+                surveyIntroTemplateId: {
+                  type: 'string',
+                  description: 'Optional approved WhatsApp template id to use for the survey intro message. If not provided or send fails, system falls back to interactive intro.'
+                }
               },
               required: ['to', 'surveyId', 'topic', 'mode']
             },
             examples: {
               ai_mode: {
                 summary: 'AI mode — dynamic question generation',
-                value: { to: '2348123456789', surveyId: 'sat-001', topic: 'Customer Satisfaction', mode: 'ai', context: 'Premium tier customer' }
+                value: { to: '2348123456789', surveyId: 'sat-001', topic: 'Customer Satisfaction', mode: 'ai', context: 'Premium tier customer', surveyIntroTemplateId: 'survey_intro_v1' }
               },
               manual_mode: {
                 summary: 'Manual mode — predefined template',
-                value: { to: '2348123456789', surveyId: 'nps-template-001', topic: 'NPS Survey', mode: 'manual' }
+                value: { to: '2348123456789', surveyId: 'nps-template-001', topic: 'NPS Survey', mode: 'manual', surveyIntroTemplateId: 'survey_intro_v1' }
               },
               meta_mode: {
                 summary: 'Meta mode — approved WhatsApp template',

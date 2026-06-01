@@ -40,3 +40,15 @@ export async function saveSurveyResponse({
     ]
   );
 }
+
+export async function getSurveyResponsesBySession(db: any, sessionId: string) {
+  const result = await db.query(
+    `SELECT question_id, question_text, response_text, response_id, created_at
+     FROM survey_responses
+     WHERE session_id = $1
+     ORDER BY created_at ASC`,
+    [sessionId]
+  );
+
+  return Array.isArray(result?.rows) ? result.rows : [];
+}

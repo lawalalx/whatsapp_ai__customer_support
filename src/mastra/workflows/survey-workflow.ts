@@ -4,7 +4,7 @@ import { createStep, createWorkflow } from '@mastra/core/workflows'
 import { z } from 'zod'
 import { surveyTemplates } from '../../surveyTemplates.js'
 import { normalizePhone } from "../../utils/format_phone.js";
-import { sendSurveyQuestion } from "../../utils/survey.sender.js";
+import { sendSurveyIntro } from "../../utils/survey.sender.js";
 
 async function loadManualSurveyQuestions(surveyId?: string) {
   if (!surveyId) return null;
@@ -141,6 +141,7 @@ const sendSurveyQuestions = createStep({
   inputSchema: z.object({
     to: z.string(),
     surveyId: z.string(),
+    surveyIntroTemplateId: z.string().optional(),
     questions: z.array(z.object({
       question: z.string(),
       options: z.array(z.string()),
@@ -156,7 +157,7 @@ const sendSurveyQuestions = createStep({
     surveySessionId: z.string(),
   }),
   execute: async ({ inputData, mastra }) => {
-    const { to, surveyId, questions } = inputData
+    const { to, surveyId, questions, surveyIntroTemplateId } = inputData
     const surveySessionId = `${surveyId}_${Date.now()}`
 
     // Store survey session in Postgres for response tracking
@@ -185,7 +186,7 @@ const sendSurveyQuestions = createStep({
                 surveySessionId,
                 surveyId,
                 normalizePhone(to),
-                0,
+                -1,
                 questions.length,
                 JSON.stringify(questions),
                 'active',
@@ -204,16 +205,10 @@ const sendSurveyQuestions = createStep({
     }
 
 
-    const firstQuestion = questions[0]
-
-    const sent = await sendSurveyQuestion({
+    const sent = await sendSurveyIntro({
       to,
-      session: {
-        id: surveySessionId,
-        current_question: 0,
-        total_questions: questions.length,
-      },
-      question: firstQuestion,
+      phoneNumberId: undefined,
+      surveyIntroTemplateId,
     })
 
 
@@ -235,6 +230,7 @@ export const surveyWorkflow = createWorkflow({
     surveyId: z.string(),
     topic: z.string(),
     context: z.string().optional(),
+    surveyIntroTemplateId: z.string().optional(),
     mode: z.enum(['ai', 'manual']).optional(),
   }),
   outputSchema: z.object({
@@ -248,6 +244,7 @@ export const surveyWorkflow = createWorkflow({
   .map(async ({ inputData, getInitData }): Promise<{
     to: string;
     surveyId: string;
+    surveyIntroTemplateId?: string;
     questions: Array<{
       question: string;
       options: string[];
@@ -261,6 +258,7 @@ export const surveyWorkflow = createWorkflow({
     return {
       to: initData.to,
       surveyId: initData.surveyId,
+      surveyIntroTemplateId: initData.surveyIntroTemplateId,
       questions: inputData.questions,
     }
   })
