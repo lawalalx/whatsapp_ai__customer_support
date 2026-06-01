@@ -126,4 +126,4 @@ EXPOSE 3000
 # Start BOTH Postgres + Node
 CMD service postgresql start && \
     su postgres -c "psql -c 'CREATE EXTENSION IF NOT EXISTS vector;'" || true && \
-    node dist/index.js
+    pnpm start
