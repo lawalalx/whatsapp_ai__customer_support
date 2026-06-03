@@ -1705,7 +1705,7 @@ const swaggerDocument = {
           }
         }
       }
-    },
+  },
 
 
   '/admin/escalation/{ticketId}/unarchive': {

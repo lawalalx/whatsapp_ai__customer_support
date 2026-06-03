@@ -120,10 +120,28 @@ export const deleteEscalationTool = createTool({
           }
         }
 
-        const result = await storageDb.any(
-          'DELETE FROM escalations WHERE ticket_id = $1 RETURNING *',
+        if (ticket.is_archived === true) {
+          return {
+            success: false,
+            ticketStatus: ticket.ticket_status,
+            message: 'This ticket is already archived and cannot be deleted.',
+          }
+        }
+
+        const result = await storageDb.query(
+        `
+          UPDATE escalations
+          SET
+            is_archived = TRUE,
+            archived_at = NOW(),
+            updated_at = NOW()
+          WHERE ticket_id = $1
+            AND is_archived = FALSE
+          RETURNING ticket_id, ticket_status
+        `,
           [ticketId]
-        )
+        );
+
         if (result.length > 0) {
           console.log('Ticket deleted successfully (via Mastra storage)')
           return { success: true, message: 'Ticket deleted successfully.' }
@@ -155,18 +173,27 @@ export const deleteEscalationTool = createTool({
         return { success: false, message: 'Ticket not found.' }
       }
 
-      if (ticket.ticket_status === 'completed') {
+      if (ticket.ticket_status === 'completed' || ticket.is_archived === true) {
         return {
           success: false,
           ticketStatus: ticket.ticket_status,
-          message: 'This ticket is already resolved and cannot be deleted.',
+          message: 'This ticket is already resolved or archived and cannot be deleted.',
         }
       }
 
       const result = await client.query(
-        'DELETE FROM escalations WHERE ticket_id = $1 RETURNING *',
-        [ticketId]
-      )
+        `
+          UPDATE escalations
+          SET
+            is_archived = TRUE,
+            archived_at = NOW(),
+            updated_at = NOW()
+          WHERE ticket_id = $1
+            AND is_archived = FALSE
+          RETURNING ticket_id, ticket_status
+        `,
+          [ticketId]
+      );
 
       if ((result.rowCount ?? 0) > 0) {
         console.log('Ticket deleted successfully (via local pool)')
@@ -188,3 +215,247 @@ export const deleteEscalationTool = createTool({
     }
   },
 })
+
+
+
+export const getEscalatedTicketsByCustomerPhoneTool = createTool({
+  id: 'get-escalated-tickets-by-customer-phone',
+  description: 'Retrieve all escalation tickets for a customer phone number',
+
+  inputSchema: z.object({
+    customerPhone: z.string(),
+  }),
+
+  outputSchema: z.object({
+    success: z.boolean(),
+    tickets: z.array(
+      z.object({
+        ticketId: z.string(),
+        message: z.string(),
+        category: z.string(),
+        ticketStatus: z.string(),
+        customerPhone: z.string(),
+        createdAt: z.string().nullable().optional(),
+      })
+    ),
+  }),
+
+  execute: async (input, context) => {
+    const { customerPhone } = input;
+
+    const query = `
+      SELECT
+        ticket_id,
+        message,
+        category,
+        ticket_status,
+        customer_phone,
+        created_at
+      FROM escalations
+      WHERE customer_phone = $1
+        AND COALESCE(is_archived, FALSE) = FALSE
+        AND ticket_status != 'completed'
+      ORDER BY created_at DESC
+    `;
+
+    const mastraInstance =
+      (context as any)?.mastra ??
+      (context as any)?.agent?.mastra ??
+      undefined;
+
+    const storageDb = mastraInstance
+      ? (mastraInstance.getStorage?.() as any)?.db
+      : undefined;
+
+    // ---------- Mastra DB ----------
+    if (storageDb && typeof storageDb.any === 'function') {
+      try {
+        const rows = await storageDb.any(query, [customerPhone]);
+
+        return {
+          success: true,
+          tickets: rows.map((row: any) => ({
+            ticketId: row.ticket_id,
+            message: row.message,
+            category: row.category,
+            ticketStatus: row.ticket_status,
+            customerPhone: row.customer_phone,
+            createdAt: row.created_at?.toISOString?.() ?? null,
+          })),
+        };
+      } catch (error) {
+        console.error(
+          'Error retrieving tickets from Mastra DB:',
+          error
+        );
+      }
+    }
+
+    // ---------- Fallback Pool ----------
+    let client;
+
+    try {
+      client = await pool.connect();
+
+      const result = await client.query(query, [customerPhone]);
+
+      return {
+        success: true,
+        tickets: result.rows.map((row) => ({
+          ticketId: row.ticket_id,
+          message: row.message,
+          category: row.category,
+          ticketStatus: row.ticket_status,
+          customerPhone: row.customer_phone,
+          createdAt: row.created_at?.toISOString?.() ?? null,
+        })),
+      };
+    } catch (error) {
+      console.error('Error retrieving tickets:', error);
+
+      return {
+        success: false,
+        tickets: [],
+      };
+    } finally {
+      client?.release();
+    }
+  },
+});
+
+
+
+export const getEscalationByTicketIdTool = createTool({
+  id: 'get-escalation-by-ticket-id',
+  description: 'Retrieve a specific escalation ticket',
+
+  inputSchema: z.object({
+    ticketId: z.string(),
+  }),
+
+  outputSchema: z.object({
+    success: z.boolean(),
+    escalation: z
+      .object({
+        ticketId: z.string(),
+        message: z.string(),
+        category: z.string(),
+        ticketStatus: z.string(),
+        customerPhone: z.string(),
+        createdAt: z.string().nullable().optional(),
+        updatedAt: z.string().nullable().optional(),
+      })
+      .nullable(),
+  }),
+
+  execute: async (input, context) => {
+    const { ticketId } = input;
+
+    const query = `
+      SELECT
+        ticket_id,
+        message,
+        category,
+        ticket_status,
+        customer_phone,
+        created_at,
+        updated_at
+      FROM escalations
+      WHERE ticket_id = $1
+        AND COALESCE(is_archived, FALSE) = FALSE
+        AND ticket_status != 'completed'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+
+    const mastraInstance =
+      (context as any)?.mastra ??
+      (context as any)?.agent?.mastra ??
+      undefined;
+
+    const storageDb = mastraInstance
+      ? (mastraInstance.getStorage?.() as any)?.db
+      : undefined;
+
+    // ---------- Mastra DB ----------
+    if (storageDb && typeof storageDb.any === 'function') {
+      try {
+        const rows = await storageDb.any(query, [ticketId]);
+
+        const ticket = rows?.[0];
+
+        if (!ticket) {
+          return {
+            success: false,
+            escalation: null,
+          };
+        }
+
+        return {
+          success: true,
+          escalation: {
+            ticketId: ticket.ticket_id,
+            message: ticket.message,
+            category: ticket.category,
+            ticketStatus: ticket.ticket_status,
+            customerPhone: ticket.customer_phone,
+            createdAt:
+              ticket.created_at?.toISOString?.() ?? null,
+            updatedAt:
+              ticket.updated_at?.toISOString?.() ?? null,
+          },
+        };
+      } catch (error) {
+        console.error(
+          'Error retrieving escalation from Mastra DB:',
+          error
+        );
+      }
+    }
+
+    // ---------- Fallback Pool ----------
+    let client;
+
+    try {
+      client = await pool.connect();
+
+      const result = await client.query(query, [ticketId]);
+
+      const ticket = result.rows[0];
+
+      if (!ticket) {
+        return {
+          success: false,
+          escalation: null,
+        };
+      }
+
+      return {
+        success: true,
+        escalation: {
+          ticketId: ticket.ticket_id,
+          message: ticket.message,
+          category: ticket.category,
+          ticketStatus: ticket.ticket_status,
+          customerPhone: ticket.customer_phone,
+          createdAt:
+            ticket.created_at?.toISOString?.() ?? null,
+          updatedAt:
+            ticket.updated_at?.toISOString?.() ?? null,
+        },
+      };
+    } catch (error) {
+      console.error(
+        'Error retrieving escalation from pool:',
+        error
+      );
+
+      return {
+        success: false,
+        escalation: null,
+      };
+    } finally {
+      client?.release();
+    }
+  },
+});
