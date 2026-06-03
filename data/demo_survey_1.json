@@ -1,6 +1,7 @@
 {
   "id": "demo_survey_1",
   "name": "Customer Satisfaction Demo Survey",
+  "mode": "manual",
   "questions": [
     {
       "id": "q1",

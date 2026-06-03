@@ -194,10 +194,18 @@ export function buildSurveyFlowJson(
     },
   });
 
+  // return {
+  //   version: '3.1',
+  //   data_api_version: '3.0',
+  //   data_channel_uri: dataEndpointUrl,
+  //   routing_model: {
+  //     INTRO: ['QUESTIONS'],
+  //     QUESTIONS: ['COMPLETE'],
+  //     COMPLETE: [],
+  //   },
   return {
-    version: '3.1',
+    version: '7.0',
     data_api_version: '3.0',
-    data_channel_uri: dataEndpointUrl,
     routing_model: {
       INTRO: ['QUESTIONS'],
       QUESTIONS: ['COMPLETE'],
@@ -239,19 +247,38 @@ export function buildSurveyFlowJson(
       },
 
       // ─── QUESTIONS ───────────────────────────────────────────────────
+        // {
+        //   id: 'QUESTIONS',
+        //   title: 'Survey Questions',
+        //   layout: {
+        //     type: 'SingleColumnLayout',
+        //     children: [
+        //       {
+        //         type: 'Form',
+        //         name: 'survey_form',
+        //         children: formChildren,
+        //       },
+        //     ],
+        //   },
+        // },
+
+
       {
         id: 'QUESTIONS',
         title: 'Survey Questions',
         layout: {
           type: 'SingleColumnLayout',
           children: [
+            ...formChildren,
             {
-              type: 'Form',
-              name: 'survey_form',
-              children: formChildren,
-            },
-          ],
-        },
+              type: 'Footer',
+              label: 'Submit Responses',
+              'on-click-action': {
+                name: 'data_exchange'
+              }
+            }
+          ]
+        }
       },
 
       // ─── COMPLETE (terminal) ─────────────────────────────────────────

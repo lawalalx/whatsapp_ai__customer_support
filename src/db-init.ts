@@ -35,7 +35,29 @@ export const initDatabase = async () => {
     console.log('🔧 Connecting to PostgreSQL...');
     const client = await pool.connect();
 
+
+
+
+    // --- ADD THIS BLOCK HERE ---
+    console.log('🧹 Cleaning up old data and migration history...');
+    await client.query(`
+      -- Drop tables in order of dependency
+      DROP TABLE IF EXISTS schema_migrations CASCADE; 
+      DROP TABLE IF EXISTS survey_responses CASCADE;
+      DROP TABLE IF EXISTS survey_sessions CASCADE;
+      DROP TABLE IF EXISTS surveys CASCADE;
+      DROP TABLE IF EXISTS meta_flow_responses CASCADE;
+      DROP TABLE IF EXISTS meta_flow_surveys CASCADE;
+      DROP TABLE IF EXISTS chat_history CASCADE;
+      DROP TABLE IF EXISTS escalation_messages CASCADE;
+      DROP TABLE IF EXISTS escalations CASCADE;
+    `);
+
     console.log('📦 Initializing database...');
+
+
+
+    
 
     // ───────────────────────────────────────────────────────────
     // Enable extension (for UUID if you switch later)
@@ -136,6 +158,8 @@ export const initDatabase = async () => {
           ticket_status   TEXT NOT NULL DEFAULT 'pending' CHECK (ticket_status IN ('pending','completed')),
           customer_phone  TEXT,
           human_agent_active BOOLEAN NOT NULL DEFAULT FALSE,
+          archived_at     TIMESTAMPTZ,
+          is_archived BOOLEAN NOT NULL DEFAULT FALSE,
           human_engaged_at TIMESTAMPTZ,
 
           created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -272,6 +296,47 @@ export const initDatabase = async () => {
       $$;
     `);
 
+    await runMigration(
+        client,
+        '2026_06_surveys_table',
+        `
+          CREATE TABLE IF NOT EXISTS surveys (
+            id              TEXT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            mode            TEXT NOT NULL CHECK (mode IN ('ai', 'manual', 'meta')),
+            description     TEXT,
+            questions_data  JSONB NOT NULL DEFAULT '[]'::jsonb,
+            status          TEXT NOT NULL DEFAULT 'active'
+                            CHECK (status IN ('active', 'inactive', 'draft')),
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            is_archived     BOOLEAN NOT NULL DEFAULT FALSE,
+            archived_at     TIMESTAMPTZ 
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_surveys_mode ON surveys(mode);
+          CREATE INDEX IF NOT EXISTS idx_surveys_status ON surveys(status);
+        `
+      );
+      
+
+
+       await client.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger
+            WHERE tgname = 'trigger_update_surveys_updated_at'
+          ) THEN
+            CREATE TRIGGER trigger_update_surveys_updated_at
+            BEFORE UPDATE ON surveys
+            FOR EACH ROW
+            EXECUTE FUNCTION update_updated_at_column();
+          END IF;
+        END;
+        $$;
+      `);
+
       // ─────────────────────────────────────────────────────────
       // Meta WhatsApp Flow Surveys  (new tables migration)
       // ─────────────────────────────────────────────────────────
@@ -288,6 +353,10 @@ export const initDatabase = async () => {
             status            TEXT NOT NULL DEFAULT 'draft'
                               CHECK (status IN ('draft', 'published', 'deprecated')),
             data_endpoint_url TEXT,
+
+            is_archived       BOOLEAN NOT NULL DEFAULT FALSE,
+            archived_at       TIMESTAMPTZ,
+
             created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
           );

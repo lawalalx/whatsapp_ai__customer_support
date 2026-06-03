@@ -5,6 +5,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
+import crypto from "crypto";
 import swaggerUi from 'swagger-ui-express';
 import express, { Application, Request, Response } from 'express';
 import { MastraServer } from '@mastra/express';
@@ -38,6 +39,7 @@ import kbDocsRoute from './mastra/core/rag/routes/docs.route.js';
 import { createKbDocsTable } from './mastra/core/rag/db.js';
 import { initVectorIndex } from './mastra/core/rag/vector-store.js';
 import { warmUpEmbeddingModel } from "./mastra/core/llm/provider.js";
+import { buildAdminListQuery } from "./utils/build-filter.js";
 
 const seenInboundMessageIds = new Map<string, number>();
 const SEEN_INBOUND_TTL_MS = 10 * 60 * 1000;
@@ -239,7 +241,7 @@ const swaggerDocument = {
     }
   },
 
-  '/api/crm/send-survey': {
+  '/admin/send-survey': {
     post: {
       summary: 'Send a survey to a single customer',
       tags: ['Admin - AI/Manual Survey'],
@@ -309,7 +311,7 @@ const swaggerDocument = {
     }
   },
 
-  '/api/crm/bulk-send-survey': {
+  '/admin/bulk-send-survey': {
     post: {
     summary: 'Send surveys to multiple customers',
     tags: ['Admin - AI/Manual Survey'],
@@ -416,6 +418,10 @@ const swaggerDocument = {
   }
   },
 
+
+
+
+
   // ─── Admin - Meta Survey ──────────────────────────────────────────────────
 
   '/admin/meta-survey': {
@@ -424,94 +430,94 @@ const swaggerDocument = {
       tags: ['Admin - Meta Survey'],
       description: `Creates a survey as a Meta WhatsApp Flow:
 
-1. Generates valid Flow JSON from your questions
-2. Creates the flow on the Meta Flows API
-3. Uploads the Flow JSON
-4. Optionally publishes it (\`autoPublish: true\`)
-5. Saves the registration to your local DB
+  1. Generates valid Flow JSON from your questions
+  2. Creates the flow on the Meta Flows API
+  3. Uploads the Flow JSON
+  4. Optionally publishes it (\`autoPublish: true\`)
+  5. Saves the registration to your local DB
 
-When a customer submits the form in WhatsApp, responses are POSTed to your \`/webhook/meta-flow-data\` endpoint and saved to \`meta_flow_responses\`.
+  When a customer submits the form in WhatsApp, responses are POSTed to your \`/webhook/meta-flow-data\` endpoint and saved to \`meta_flow_responses\`.
 
----
-### Question types
+  ---
+  ### Question types
 
-| type | WhatsApp component | Best for | Max options |
-|------|-------------------|----------|-------------|
-| \`list\` | Dropdown | 3–10 choices | 200 |
-| \`button\` | RadioButtonsGroup | 2–5 choices | 5 |
-| \`text\` | TextInput | Short free text | — |
-| \`textarea\` | TextArea | Long free text | — |
-| \`date\` | DatePicker | Date selection | — |
+  | type | WhatsApp component | Best for | Max options |
+  |------|-------------------|----------|-------------|
+  | \`list\` | Dropdown | 3–10 choices | 200 |
+  | \`button\` | RadioButtonsGroup | 2–5 choices | 5 |
+  | \`text\` | TextInput | Short free text | — |
+  | \`textarea\` | TextArea | Long free text | — |
+  | \`date\` | DatePicker | Date selection | — |
 
-### Flow screen layout
-\`\`\`
-INTRO (navigate) → QUESTIONS (data_exchange) → COMPLETE (terminal)
-\`\`\`
+  ### Flow screen layout
+  \`\`\`
+  INTRO (navigate) → QUESTIONS (data_exchange) → COMPLETE (terminal)
+  \`\`\`
 
-> **Publishing note:** Once published, a flow **cannot be unpublished** — only deprecated. Use \`autoPublish: false\` (default) to review in the Meta Flow Builder first.`,
-      requestBody: {
-        required: true,
-        content: {
-          'application/json': {
-            schema: { $ref: '#/components/schemas/MetaFlowSurveyDefinition' },
-            examples: {
-              csat: {
-                summary: 'CSAT Survey (3 questions, mixed types)',
-                value: {
-                  name: 'Post-Transaction Survey',
-                  description: 'Help us improve your banking experience. Takes 1 minute.',
-                  surveyId: 'csat-q1-2026',
-                  thankYouText: 'Thank you! Your feedback helps us serve you better.',
-                  autoPublish: false,
-                  questions: [
-                    { id: 'satisfaction', text: 'How satisfied are you with our service?', type: 'list', options: ['Very Satisfied','Satisfied','Neutral','Dissatisfied','Very Dissatisfied'], required: true },
-                    { id: 'recommend', text: 'Would you recommend FBNBank to a friend?', type: 'button', options: ['Yes','No','Maybe'], required: true },
-                    { id: 'improvement', text: 'What can we improve?', type: 'textarea', required: false, placeholder: 'Tell us what you think...' }
-                  ]
-                }
-              },
-              nps: {
-                summary: 'NPS Survey',
-                value: {
-                  name: 'Net Promoter Score',
-                  surveyId: 'nps-2026',
-                  autoPublish: false,
-                  questions: [
-                    { id: 'nps_score', text: 'How likely are you to recommend us? (1–10)', type: 'list', options: ['1','2','3','4','5','6','7','8','9','10'], required: true },
-                    { id: 'nps_reason', text: 'Main reason for your score?', type: 'textarea', required: false }
-                  ]
+  > **Publishing note:** Once published, a flow **cannot be unpublished** — only deprecated. Use \`autoPublish: false\` (default) to review in the Meta Flow Builder first.`,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/MetaFlowSurveyDefinition' },
+              examples: {
+                csat: {
+                  summary: 'CSAT Survey (3 questions, mixed types)',
+                  value: {
+                    name: 'Post-Transaction Survey',
+                    description: 'Help us improve your banking experience. Takes 1 minute.',
+                    surveyId: 'csat-q1-2026',
+                    thankYouText: 'Thank you! Your feedback helps us serve you better.',
+                    autoPublish: false,
+                    questions: [
+                      { id: 'satisfaction', text: 'How satisfied are you with our service?', type: 'list', options: ['Very Satisfied','Satisfied','Neutral','Dissatisfied','Very Dissatisfied'], required: true },
+                      { id: 'recommend', text: 'Would you recommend FBNBank to a friend?', type: 'button', options: ['Yes','No','Maybe'], required: true },
+                      { id: 'improvement', text: 'What can we improve?', type: 'textarea', required: false, placeholder: 'Tell us what you think...' }
+                    ]
+                  }
+                },
+                nps: {
+                  summary: 'NPS Survey',
+                  value: {
+                    name: 'Net Promoter Score',
+                    surveyId: 'nps-2026',
+                    autoPublish: false,
+                    questions: [
+                      { id: 'nps_score', text: 'How likely are you to recommend us? (1–10)', type: 'list', options: ['1','2','3','4','5','6','7','8','9','10'], required: true },
+                      { id: 'nps_reason', text: 'Main reason for your score?', type: 'textarea', required: false }
+                    ]
+                  }
                 }
               }
             }
           }
+        },
+        responses: {
+          '201': {
+            description: 'Flow created (and optionally published)',
+            content: { 'application/json': { schema: { type: 'object', properties: {
+              success: { type: 'boolean' },
+              flowId: { type: 'string' },
+              surveyId: { type: 'string', nullable: true },
+              status: { type: 'string', enum: ['draft','published'] },
+              dataEndpointUrl: { type: 'string' },
+              uploadResult: { type: 'object' },
+              publishResult: { type: 'object', nullable: true }
+            }}}}
+          },
+          '400': { description: 'Validation error' },
+          '500': { description: 'Meta API or server error' }
         }
       },
-      responses: {
-        '201': {
-          description: 'Flow created (and optionally published)',
-          content: { 'application/json': { schema: { type: 'object', properties: {
-            success: { type: 'boolean' },
-            flowId: { type: 'string' },
-            surveyId: { type: 'string', nullable: true },
-            status: { type: 'string', enum: ['draft','published'] },
-            dataEndpointUrl: { type: 'string' },
-            uploadResult: { type: 'object' },
-            publishResult: { type: 'object', nullable: true }
-          }}}}
-        },
-        '400': { description: 'Validation error' },
-        '500': { description: 'Meta API or server error' }
+      get: {
+        summary: 'List all registered Meta Flow surveys',
+        tags: ['Admin - Meta Survey'],
+        description: 'Returns all Meta WhatsApp Flow surveys registered in the local DB, ordered by creation date descending.',
+        responses: {
+          '200': { description: 'Array of survey records' }
+        }
       }
     },
-    get: {
-      summary: 'List all registered Meta Flow surveys',
-      tags: ['Admin - Meta Survey'],
-      description: 'Returns all Meta WhatsApp Flow surveys registered in the local DB, ordered by creation date descending.',
-      responses: {
-        '200': { description: 'Array of survey records' }
-      }
-    }
-  },
 
   '/admin/meta-survey/{flowId}': {
     get: {
@@ -554,7 +560,7 @@ INTRO (navigate) → QUESTIONS (data_exchange) → COMPLETE (terminal)
     }
   },
 
-  '/admin/meta-survey/{flowId}/delete-published': {
+  '/admin/meta-survey/{flowId}/delete-published/archived': {
     delete: {
       summary: 'Delete a PUBLISHED Meta Flow survey',
       tags: ['Admin - Meta Survey'],
@@ -568,9 +574,92 @@ INTRO (navigate) → QUESTIONS (data_exchange) → COMPLETE (terminal)
     }
   },
 
-  '/admin/meta-survey/{flowId}/delete-with-responses': {
+  '/admin/meta-survey/archived': {
+    get: {
+      summary: 'Get all archived Meta Flow surveys',
+      tags: ['Admin - Meta Survey'],
+      description: `
+        Retrieves all Meta Flow surveys that have been archived (soft deleted).
+
+        These surveys:
+        - Are no longer active or visible in the main survey list
+        - Are preserved for audit and compliance purposes
+        - Can potentially be restored later (if unarchived endpoint is implemented)
+
+        This endpoint is useful for:
+        - Audit trails
+        - Compliance reporting (banking use case)
+        - Reviewing previously retired surveys
+        - Data governance and history tracking
+      `,
+      responses: {
+        '200': {
+          description: 'Archived Meta Flow surveys retrieved successfully',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  count: {
+                    type: 'integer',
+                    example: 3
+                  },
+                  surveys: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'string' },
+                        flow_id: { type: 'string' },
+                        flow_name: { type: 'string' },
+                        survey_id: { type: 'string', nullable: true },
+                        questions_data: {
+                          type: 'array',
+                          items: { type: 'object' }
+                        },
+                        status: {
+                          type: 'string',
+                          enum: ['draft', 'published', 'deprecated']
+                        },
+                        is_archived: {
+                          type: 'boolean',
+                          example: true
+                        },
+                        archived_at: {
+                          type: 'string',
+                          format: 'date-time',
+                          nullable: true
+                        },
+                        data_endpoint_url: {
+                          type: 'string',
+                          nullable: true
+                        },
+                        created_at: {
+                          type: 'string',
+                          format: 'date-time'
+                        },
+                        updated_at: {
+                          type: 'string',
+                          format: 'date-time'
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        '500': {
+          description: 'Failed to retrieve archived Meta Flow surveys'
+        }
+      }
+    }
+  },
+
+  '/admin/meta-survey/{flowId}/delete-with-responses/purge': {
     delete: {
-      summary: 'Delete a flow and all its saved responses',
+      summary: 'Dangerous! Delete a flow and all its saved responses',
       tags: ['Admin - Meta Survey'],
       description: 'Deletes the flow handling state and all local response records for the given flow. For DRAFT flows, it hard-deletes on Meta. For published/deprecated flows, it deprecates (if needed) then removes local records.',
       parameters: [{ name: 'flowId', in: 'path', required: true, schema: { type: 'string' } }],
@@ -581,74 +670,74 @@ INTRO (navigate) → QUESTIONS (data_exchange) → COMPLETE (terminal)
     }
   },
 
-  '/api/crm/meta-survey/send': {
+  '/admin/meta-survey/send': {
     post: {
       summary: 'Send a Meta Flow survey to one or many customers',
       tags: ['Admin - Meta Survey'],
       description: `Sends an interactive WhatsApp Flow message with a CTA button that opens the survey inside WhatsApp.
 
-You can send to a **single customer** or a **list of customers** in one request.
+      You can send to a **single customer** or a **list of customers** in one request.
 
-The **\`flowToken\`** can be any non-empty string (for example \`first-survey\`).
-- If omitted, the server auto-generates one.
-- If sending to multiple recipients, the server appends \`-1\`, \`-2\`, ... to keep each token unique for DB correlation.`,
-      requestBody: {
-        required: true,
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              required: ['to','flowId'],
-              properties: {
-                to: {
-                  oneOf: [
-                    { type: 'string', example: '2349013360717' },
-                    { type: 'array', items: { type: 'string' }, example: ['2349013360717', '2348012345678'], minItems: 1 }
-                  ],
-                  description: 'Recipient phone or list of recipient phones in E.164 without +.'
+      The **\`flowToken\`** can be any non-empty string (for example \`first-survey\`).
+      - If omitted, the server auto-generates one.
+      - If sending to multiple recipients, the server appends \`-1\`, \`-2\`, ... to keep each token unique for DB correlation.`,
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['to','flowId'],
+                  properties: {
+                    to: {
+                      oneOf: [
+                        { type: 'string', example: '2349013360717' },
+                        { type: 'array', items: { type: 'string' }, example: ['2349013360717', '2348012345678'], minItems: 1 }
+                      ],
+                      description: 'Recipient phone or list of recipient phones in E.164 without +.'
+                    },
+                    flowId: { type: 'string', example: '1234567890', description: 'Meta Flow ID returned by POST /admin/meta-survey' },
+                    flowToken: { type: 'string', example: 'first-survey', description: 'Optional base token. Can be any non-empty string. For bulk sends, server auto-suffixes per recipient for uniqueness.' },
+                    cta: { type: 'string', default: 'Take Survey', description: 'CTA button label (max 20 chars)' },
+                    headerText: { type: 'string', description: 'Message header (max 60 chars)' },
+                    bodyText: { type: 'string', description: 'Message body shown before the CTA button (max 1024 chars)' },
+                    footerText: { type: 'string', description: 'Message footer (max 60 chars)' },
+                    phoneNumberId: { type: 'string', description: 'Override WhatsApp Phone Number ID (defaults to env var)' }
+                  }
                 },
-                flowId: { type: 'string', example: '1234567890', description: 'Meta Flow ID returned by POST /admin/meta-survey' },
-                flowToken: { type: 'string', example: 'first-survey', description: 'Optional base token. Can be any non-empty string. For bulk sends, server auto-suffixes per recipient for uniqueness.' },
-                cta: { type: 'string', default: 'Take Survey', description: 'CTA button label (max 20 chars)' },
-                headerText: { type: 'string', description: 'Message header (max 60 chars)' },
-                bodyText: { type: 'string', description: 'Message body shown before the CTA button (max 1024 chars)' },
-                footerText: { type: 'string', description: 'Message footer (max 60 chars)' },
-                phoneNumberId: { type: 'string', description: 'Override WhatsApp Phone Number ID (defaults to env var)' }
-              }
-            },
-            examples: {
-              single: {
-                summary: 'Single recipient',
-                value: {
-                  to: '2349013360717',
-                  flowId: '1234567890',
-                  flowToken: 'first-survey',
-                  cta: 'Take Survey',
-                  bodyText: 'Please help us improve by completing a 1-minute survey.',
-                  headerText: 'Quick Survey'
-                }
-              },
-              bulk: {
-                summary: 'Bulk recipients',
-                value: {
-                  to: ['2349013360717', '2348012345678'],
-                  flowId: '1234567890',
-                  flowToken: 'june-csat',
-                  cta: 'Take Survey',
-                  bodyText: 'Please complete this 1-minute survey.'
+                examples: {
+                  single: {
+                    summary: 'Single recipient',
+                    value: {
+                      to: '2349013360717',
+                      flowId: '1234567890',
+                      flowToken: 'first-survey',
+                      cta: 'Take Survey',
+                      bodyText: 'Please help us improve by completing a 1-minute survey.',
+                      headerText: 'Quick Survey'
+                    }
+                  },
+                  bulk: {
+                    summary: 'Bulk recipients',
+                    value: {
+                      to: ['2349013360717', '2348012345678'],
+                      flowId: '1234567890',
+                      flowToken: 'june-csat',
+                      cta: 'Take Survey',
+                      bodyText: 'Please complete this 1-minute survey.'
+                    }
+                  }
                 }
               }
             }
+          },
+          responses: {
+            '200': { description: 'Message(s) sent (all or partial success)' },
+            '400': { description: 'Validation error' },
+            '500': { description: 'Send failed for all recipients' }
           }
         }
       },
-      responses: {
-        '200': { description: 'Message(s) sent (all or partial success)' },
-        '400': { description: 'Validation error' },
-        '500': { description: 'Send failed for all recipients' }
-      }
-    }
-  },
 
   '/webhook/meta-flow-data': {
     post: {
@@ -656,25 +745,25 @@ The **\`flowToken\`** can be any non-empty string (for example \`first-survey\`)
       tags: ['Webhook'],
       description: `**WhatsApp Flows Data Endpoint** — Meta calls this URL during flow execution.
 
-Set this as the \`dataEndpointUrl\` when creating surveys (or set \`SERVER_URL\` env var).
+      Set this as the \`dataEndpointUrl\` when creating surveys (or set \`SERVER_URL\` env var).
 
-### Actions
+      ### Actions
 
-| action | trigger | server response |
-|--------|---------|-----------------|
-| \`INIT\` | User opens QUESTIONS screen | \`{ screen: "QUESTIONS", data: {} }\` |
-| \`data_exchange\` | User taps **Submit Responses** | Saves to DB → \`{ screen: "COMPLETE", data: {} }\` |
-| \`BACK\` | User navigates back (if refresh_on_back=true) | \`{ screen: current, data: {} }\` |
+      | action | trigger | server response |
+      |--------|---------|-----------------|
+      | \`INIT\` | User opens QUESTIONS screen | \`{ screen: "QUESTIONS", data: {} }\` |
+      | \`data_exchange\` | User taps **Submit Responses** | Saves to DB → \`{ screen: "COMPLETE", data: {} }\` |
+      | \`BACK\` | User navigates back (if refresh_on_back=true) | \`{ screen: current, data: {} }\` |
 
-### Response saved on \`data_exchange\`
-Form fields are saved immediately to \`meta_flow_responses\` with:
-- \`flow_id\` — the Meta Flow ID
-- \`flow_token\` — unique token from the send (correlates to your send record)
-- \`responses\` — map of question IDs → submitted values
-- \`source: "data_exchange"\`
+      ### Response saved on \`data_exchange\`
+      Form fields are saved immediately to \`meta_flow_responses\` with:
+      - \`flow_id\` — the Meta Flow ID
+      - \`flow_token\` — unique token from the send (correlates to your send record)
+      - \`responses\` — map of question IDs → submitted values
+      - \`source: "data_exchange"\`
 
-> **Production note:** Meta encrypts the payload. Add decryption using \`FLOW_PRIVATE_KEY\` before going live.`,
-      requestBody: {
+      > **Production note:** Meta encrypts the payload. Add decryption using \`FLOW_PRIVATE_KEY\` before going live.`,
+        requestBody: {
         required: true,
         content: {
           'application/json': {
@@ -699,7 +788,8 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
     }
   },
 
-  '/api/meta-survey/responses': {
+
+  '/admin/meta-survey/responses': {
     get: {
       summary: 'Query Meta Flow survey responses',
       tags: ['Admin - Meta Survey'],
@@ -736,7 +826,7 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
     }
   },
 
-  '/api/crm/survey-responses': {
+  '/admin/survey-responses': {
     get: {
       summary: 'Retrieve survey responses',
       tags: ['Admin - AI/Manual Survey'],
@@ -790,48 +880,317 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
     }
   },
 
-  '/api/crm/meta-survey-responses': {
-    get: {
-      summary: 'Meta survey responses (placeholder)',
-      tags: ['Admin - AI/Manual Survey'],
-      description: `
-      Placeholder endpoint for retrieving responses from Meta-hosted survey flows.
-
-      Currently returns stub data and can be extended for full Meta integration.
-      `,
-      responses: {
-        '200': { description: 'Stub response returned' }
-      }
-    }
-  },
-  
   '/admin/survey': {
-    post: {
-      summary: 'Create and store a manual survey template',
-      tags: ['Admin - AI/Manual Survey'],
-      description: `
-      Creates a reusable survey template and stores it locally as a JSON file.
 
-      These templates are used in "manual" mode when sending surveys, allowing predefined
-      question flows instead of AI-generated ones.
+    post: {
+
+      summary: 'Create a manual survey',
+
+      tags: ['Admin - AI/Manual Survey'],
+
+      description: `
+
+      Creates a reusable survey and stores it in the surveys table.
+
+
+
+      These surveys are used in "manual" mode when sending surveys,
+
+      allowing predefined question flows instead of AI-generated ones.
+
+
 
       Use cases:
+
       - Regulatory-compliant surveys
+
       - Fixed questionnaires (e.g., NPS, onboarding feedback)
 
-      The template must follow the SurveyTemplate schema.
+      - Customer satisfaction surveys
+
+      - Product feedback collection
+
+
+
+      The survey definition must follow the SurveyTemplate schema.
+
       `,
+
       requestBody: {
+
         required: true,
+
         content: {
+
           'application/json': {
+
             schema: { $ref: '#/components/schemas/SurveyTemplate' }
+
+          }
+
+        }
+
+      },
+
+      responses: {
+
+        '201': { description: 'Survey created successfully' },
+
+        '400': { description: 'Validation failed (invalid structure)' },
+
+        '500': { description: 'Failed to create survey' }
+
+      }
+
+    }
+  },
+
+  '/admin/survey/{surveyId}/archive': {
+      delete: {
+        summary: 'Archive a survey',
+        tags: ['Admin - AI/Manual Survey'],
+        description: `
+          Soft deletes (archives) a survey without removing it from the database.
+
+          This operation:
+          - Sets is_archived = true
+          - Records archived_at timestamp
+          - Preserves survey definitions
+          - Preserves survey responses
+          - Preserves survey sessions
+          - Maintains audit history
+
+          Archived surveys are hidden from normal survey listings
+          but can be restored later using the unarchive endpoint.
+
+          Typical use cases:
+          - Retiring obsolete surveys
+          - Regulatory audit compliance
+          - Preventing further survey usage
+          - Administrative cleanup without data loss
+        `,
+        parameters: [
+          {
+            name: 'surveyId',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string'
+            }
+          }
+        ],
+        responses: {
+          '200': {
+            description: 'Survey archived successfully'
+          },
+          '404': {
+            description: 'Survey not found or already archived'
+          },
+          '500': {
+            description: 'Failed to archive survey'
           }
         }
-      },
+      }
+    },
+
+    '/admin/survey/{surveyId}/unarchive': {
+      patch: {
+        summary: 'Restore an archived survey',
+        tags: ['Admin - AI/Manual Survey'],
+        description: `
+          Restores a previously archived survey.
+
+          This operation:
+          - Sets is_archived = false
+          - Clears archived_at timestamp
+          - Makes the survey visible again
+          - Allows the survey to be reused
+
+          Survey data, responses, and sessions remain unchanged.
+        `,
+        parameters: [
+          {
+            name: 'surveyId',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string'
+            }
+          }
+        ],
+        responses: {
+          '200': {
+            description: 'Survey restored successfully'
+          },
+          '404': {
+            description: 'Survey not found or not archived'
+          },
+          '500': {
+            description: 'Failed to restore survey'
+          }
+        }
+      }
+    },
+
+
+    '/admin/surveys/archived': {
+      get: {
+        summary: 'Get all archived surveys',
+        tags: ['Admin - AI/Manual Survey'],
+        description: `
+          Retrieves all archived surveys.
+
+          Archived surveys are surveys that have been soft-deleted
+          using the archive endpoint.
+
+          This endpoint returns:
+          - Survey metadata
+          - Survey status
+          - Archive timestamp
+          - Creation and update timestamps
+
+          Archived surveys:
+          - Are hidden from normal survey listings
+          - Cannot be used for new survey campaigns
+          - Can be restored using the unarchive endpoint
+
+          This endpoint is useful for:
+          - Audit and compliance reviews
+          - Survey recovery workflows
+          - Administrative reporting
+        `,
+        responses: {
+          '200': {
+            description: 'Archived surveys retrieved successfully'
+          },
+          '500': {
+            description: 'Failed to retrieve archived surveys'
+          }
+        }
+      }
+    },
+
+  '/admin/survey/{surveyId}': {
+
+    delete: {
+
+      summary: 'Delete a survey and its associated data',
+
+      tags: ['Admin - AI/Manual Survey'],
+
+      description: `
+
+      Deletes all data associated with a survey, including:
+      - Survey definition
+      - Survey responses
+      - Survey sessions (progress tracking)
+
+      This is a destructive operation and should be used with caution.
+
+      Typical use cases:
+      - Data cleanup
+      - Retesting environments
+      - Removing obsolete surveys
+
+    `,
+
+    parameters: [
+
+      {
+
+        name: 'surveyId',
+
+        in: 'path',
+
+        required: true,
+
+        schema: { type: 'string' }
+
+      }
+
+    ],
+
+    responses: {
+
+      '200': { description: 'Survey deleted successfully' },
+
+      '404': { description: 'Survey not found' },
+
+      '500': { description: 'Failed to delete survey data' }
+
+    }
+
+  }
+  },
+
+  '/admin/surveys': {
+    get: {
+      summary: 'Get surveys',
+      tags: ['Admin - AI/Manual Survey'],
+      description: `
+        Retrieves survey definitions from the surveys table.
+
+        Supports filtering by:
+        - mode (ai, manual, meta)
+        - status (active, inactive, draft)
+        - archive state (archived or active records)
+
+        Behavior:
+        - Returns a list of surveys.
+        - Use /admin/surveys/:surveyId for single survey retrieval.
+
+        Examples:
+        - GET /admin/surveys?mode=manual&status=active
+        - GET /admin/surveys?mode=meta&archived=true
+      `,
+      parameters: [
+        {
+          name: 'mode',
+          in: 'query',
+          required: false,
+          schema: {
+            type: 'string',
+            enum: ['ai', 'manual', 'meta']
+          }
+        },
+        {
+          name: 'status',
+          in: 'query',
+          required: false,
+          schema: {
+            type: 'string',
+            enum: ['active', 'inactive', 'draft']
+          }
+        },
+        {
+          name: 'archived',
+          in: 'query',
+          required: false,
+          schema: {
+            type: 'boolean'
+          }
+        }
+      ],
       responses: {
-        '201': { description: 'Survey template created successfully' },
-        '400': { description: 'Validation failed (invalid structure)' }
+        '200': {
+          description: 'Surveys retrieved successfully',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  count: { type: 'integer' },
+                  surveys: {
+                    type: 'array',
+                    items: {
+                      type: 'object'
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -893,80 +1252,41 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
     }
   },
 
-  '/admin/survey/{surveyId}/file': {
-    delete: {
-      summary: 'Delete survey template file',
-      tags: ['Admin - AI/Manual Survey'],
-      description: `
-      Deletes a locally stored survey template JSON file from the data directory.
-
-      This does NOT delete survey responses stored in the database.
-      Only removes the template definition used for manual survey mode.
-      `,
-      parameters: [
-        {
-          name: 'surveyId',
-          in: 'path',
-          required: true,
-          schema: { type: 'string' }
-        }
-      ],
-      responses: {
-        '200': { description: 'Survey template file deleted successfully' },
-        '404': { description: 'Survey file not found' }
-      }
-    }
-  },
-
-  '/admin/survey/{surveyId}': {
-    delete: {
-      summary: 'Delete survey (data + sessions)',
-      tags: ['Admin - AI/Manual Survey'],
-      description: `
-      Deletes all data associated with a survey, including:
-      - Survey responses
-      - Survey sessions (progress tracking)
-      - Associated template file (if it exists)
-
-      This is a destructive operation and should be used with caution.
-      Typically used for:
-      - Data cleanup
-      - Retesting environments
-      `,
-      parameters: [
-        {
-          name: 'surveyId',
-          in: 'path',
-          required: true,
-          schema: { type: 'string' }
-        }
-      ],
-      responses: {
-        '200': { description: 'Survey data deleted successfully' },
-        '500': { description: 'Failed to delete survey data' }
-      }
-    }
-  },
-
   '/admin/escalations': {
     get: {
       summary: 'Get escalations',
       tags: ['Admin - Escalation'],
       description: `
-      Returns a list of escalations (human handoff / tickets) from the database.
+        Returns a list of escalations (human handoff / tickets).
 
-      Useful for:
-      - Monitoring pending tickets
-      - Tracking completed tickets
-      - Analyzing escalation trends
+        Supports filtering by:
+        - status (pending, completed)
+        - archive state (active or archived records)
+
+        Use cases:
+        - Monitor active support tickets
+        - Review completed escalations
+        - Access archived historical tickets
       `,
       parameters: [
         {
           name: 'status',
           in: 'query',
           required: false,
-          description: "Filter escalations by status. One of: pending, completed",
-          schema: { type: 'string', enum: ['pending','completed'] }
+          description: 'Filter by ticket status',
+          schema: {
+            type: 'string',
+            enum: ['pending', 'completed']
+          }
+        },
+        {
+          name: 'archived',
+          in: 'query',
+          required: false,
+          description: 'Filter by archive state',
+          schema: {
+            type: 'boolean'
+          }
         }
       ],
       responses: {
@@ -975,21 +1295,42 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
           content: {
             'application/json': {
               schema: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    id: { type: 'integer' },
-                    ticket_id: { type: 'string' },
-                    message: { type: 'string' },
-                    category: { type: 'string', enum: ['complaint','enquiry','request'] },
-                    ticket_status: { type: 'string', enum: ['pending','completed'] },
-                    customer_phone: { type: 'string' },
-                    human_agent_active: { type: 'boolean' },
-                    handoff_phone: { type: 'string', nullable: true },
-                    human_engaged_at: { type: 'string', format: 'date-time', nullable: true },
-                    created_at: { type: 'string', format: 'date-time' },
-                    updated_at: { type: 'string', format: 'date-time' }
+                type: 'object',
+                properties: {
+                  escalations: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'integer' },
+                        ticket_id: { type: 'string' },
+                        message: { type: 'string' },
+                        category: {
+                          type: 'string',
+                          enum: ['complaint', 'enquiry', 'request']
+                        },
+                        ticket_status: {
+                          type: 'string',
+                          enum: ['pending', 'completed']
+                        },
+                        is_archived: { type: 'boolean' },
+                        archived_at: {
+                          type: 'string',
+                          format: 'date-time',
+                          nullable: true
+                        },
+                        customer_phone: { type: 'string' },
+                        human_agent_active: { type: 'boolean' },
+                        handoff_phone: { type: 'string', nullable: true },
+                        human_engaged_at: {
+                          type: 'string',
+                          format: 'date-time',
+                          nullable: true
+                        },
+                        created_at: { type: 'string', format: 'date-time' },
+                        updated_at: { type: 'string', format: 'date-time' }
+                      }
+                    }
                   }
                 }
               }
@@ -999,7 +1340,6 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
       }
     }
   },
-
   '/admin/escalation/{ticketId}/resolve': {
     post: {
       summary: 'Resolve escalation',
@@ -1113,6 +1453,7 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
       }
     }
   },
+
   '/admin/escalation/message': {
     post: {
       summary: 'Send spontaneous human message(s)',
@@ -1159,6 +1500,7 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
       }
     }
   },
+
   '/admin/escalation/{ticketId}/messages': {
     get: {
       summary: 'Get escalation messages',
@@ -1200,6 +1542,7 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
       }
     }
   },
+
   '/admin/escalation/{ticketId}/release': {
     post: {
       summary: 'Release human handoff',
@@ -1227,6 +1570,7 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
       }
     }
   },
+
   '/admin/chat-history/messages': {
     get: {
       summary: 'Get detailed chat history',
@@ -1257,6 +1601,7 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
       }
     }
   },
+
   '/admin/chat-history/threads': {
     get: {
       summary: 'Get chat history threads summary',
@@ -1283,12 +1628,13 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
       }
     }
   },
+
   '/admin/escalation/{ticketId}': {
     delete: {
-      summary: 'Delete escalation',
+      summary: 'Archive escalation',
       tags: ['Admin - Escalation'],
       description: `
-      Deletes an escalation (human handoff / ticket) from the database.
+      Archives an escalation (human handoff / ticket) in the database.
 
       Useful for:
       - Removing completed tickets
@@ -1303,13 +1649,155 @@ Form fields are saved immediately to \`meta_flow_responses\` with:
         }
       ],
       responses: {
-        '200': { description: 'Escalation deleted successfully' },
+        '200': { description: 'Escalation archived successfully' },
         '404': { description: 'The escalation with this ID is not found. Probably deleted' },
-        '500': { description: 'Failed to delete escalation' }
+        '500': { description: 'Failed to archive escalation' }
       }
     }
   },
 
+  '/admin/escalation/{ticketId}/purge': {
+      delete: {
+        summary: 'Permanently delete a completed escalation',
+        tags: ['Admin - Escalation'],
+        description: `
+          Permanently deletes an escalation ticket from the database.
+
+          ⚠️ This is a destructive operation and cannot be undone.
+
+          Rules:
+          - Only escalations with status = "completed" can be deleted
+          - Active or pending escalations cannot be purged
+          - This removes all data permanently (no archive/recovery)
+        `,
+        parameters: [
+          {
+            name: 'ticketId',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string'
+            },
+            description: 'Unique escalation ticket ID'
+          }
+        ],
+        responses: {
+          '200': {
+            description: 'Escalation permanently deleted',
+            content: {
+              'application/json': {
+                example: {
+                  success: true,
+                  ticketId: 'TICKET_123',
+                  deleted: true
+                }
+              }
+            }
+          },
+          '400': {
+            description: 'Invalid request or ticket not eligible for deletion'
+          },
+          '404': {
+            description: 'Escalation not found'
+          },
+          '500': {
+            description: 'Server error while deleting escalation'
+          }
+        }
+      }
+    },
+
+
+  '/admin/escalation/{ticketId}/unarchive': {
+    patch: {
+      summary: 'Restore an archived escalation',
+      tags: ['Admin - Escalation'],
+      description: `
+        Restores an archived escalation back to active state.
+
+        This operation:
+        - Sets is_archived = false
+        - Clears archived_at timestamp
+        - Makes the escalation visible again in active lists
+
+        Note:
+        - Only archived escalations can be restored
+        - Original ticket data is unchanged
+      `,
+      parameters: [
+        {
+          name: 'ticketId',
+          in: 'path',
+          required: true,
+          schema: {
+            type: 'string'
+          },
+          description: 'Escalation ticket ID'
+        }
+      ],
+      responses: {
+        '200': {
+          description: 'Escalation restored successfully',
+          content: {
+            'application/json': {
+              example: {
+                success: true,
+                ticketId: 'TICKET_123',
+                restored: true
+              }
+            }
+          }
+        },
+        '404': {
+          description: 'Escalation not found or not archived'
+        },
+        '500': {
+          description: 'Server error while restoring escalation'
+        }
+      }
+    }
+  },
+
+  '/admin/escalations/archived': {
+    get: {
+      summary: 'Get all archived escalations',
+      tags: ['Admin - Escalation'],
+      description: `
+        Returns all escalations that have been archived.
+
+        Use cases:
+        - Audit review
+        - Historical support tracking
+        - Compliance reporting
+
+        Only returns:
+        - is_archived = true records
+      `,
+      responses: {
+        '200': {
+          description: 'List of archived escalations',
+          content: {
+            'application/json': {
+              example: {
+                count: 2,
+                escalations: [
+                  {
+                    ticket_id: 'TICKET_123',
+                    ticket_status: 'completed',
+                    is_archived: true,
+                    archived_at: '2026-06-03T10:00:00Z'
+                  }
+                ]
+              }
+            }
+          }
+        },
+        '500': {
+          description: 'Server error while fetching archived escalations'
+        }
+      }
+    }
+  },
 
   '/api/agent/chat': {
     post: {
@@ -1683,108 +2171,312 @@ const SurveyQuestionSchema = z.object({
 const SurveyTemplateSchema = z.object({
   id: z.string(),
   name: z.string(),
+  mode: z.enum(['manual', 'ai', 'meta']).default('manual'),
   questions: z.array(SurveyQuestionSchema),
 });
+
+
+
 
 app.post('/admin/survey', async (req: Request, res: Response) => {
   try {
     const body = req.body;
+
     const parse = SurveyTemplateSchema.safeParse(body);
+
     if (!parse.success) {
-      return res.status(400).json({ error: 'validation_failed', details: parse.error.format() });
+      return res.status(400).json({
+        error: 'validation_failed',
+        details: parse.error.format(),
+      });
     }
 
-    const tpl = parse.data;
-    const outDir = path.join(process.cwd(), 'data');
-    try { await fs.mkdir(outDir, { recursive: true }); } catch (e) {}
-    const filePath = path.join(outDir, `${tpl.id}.json`);
-    await fs.writeFile(filePath, JSON.stringify(tpl, null, 2), 'utf-8');
+    const survey = parse.data;
 
-    return res.status(201).json({ success: true, file: `data/${tpl.id}.json` });
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+
+    if (!db) {
+      return res.status(500).json({
+        error: 'DB not initialized',
+      });
+    }
+
+    await db.query(
+      `
+      INSERT INTO surveys (
+        id,
+        name,
+        mode,
+        questions_data
+      )
+      VALUES ($1, $2, $3, $4)
+      `,
+      [
+        survey.id,
+        survey.name,
+        survey.mode,
+        JSON.stringify(survey.questions),
+      ]
+    );
+
+    return res.status(201).json({
+      success: true,
+      survey: {
+        id: survey.id,
+        name: survey.name,
+        mode: survey.mode,
+      },
+    });
   } catch (e) {
-    console.error('Failed to create survey template', e);
-    return res.status(500).json({ error: 'failed' });
+    console.error('Failed to create survey', e);
+
+    return res.status(500).json({
+      error: 'failed',
+    });
   }
 });
 
-// DELETE manual survey file from data/<surveyId>.json
-app.delete('/admin/survey/:surveyId/file', async (req: Request, res: Response) => {
-  const surveyId = req.params.surveyId;
+
+app.get('/admin/surveys', async (req, res) => {
+  const storage = mastra.getStorage() as any;
+  const db = storage?.db;
+
+  const { query, values } = buildAdminListQuery(
+    `SELECT * FROM surveys`,
+    {
+      statusColumn: 'status',
+      archivedColumn: 'is_archived',
+      filters: req.query as any
+    }
+  );
+
+  const result = await db.query(query, values);
+
+  return res.json({
+    count: result.rows.length,
+    surveys: result.rows
+  });
+});
+
+
+
+
+app.delete('/admin/survey/:surveyId/archive', async (req, res) => {
   try {
-    const filePath = path.join(process.cwd(), 'data', `${surveyId}.json`);
-    try {
-      await fs.unlink(filePath);
-      return res.json({ success: true, file: `data/${surveyId}.json`, deleted: true });
-    } catch (err: any) {
-      if (err.code === 'ENOENT') {
-        return res.status(404).json({ error: 'not_found', message: 'file not found' });
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+
+    if (!db) {
+      throw new Error('Database not initialized');
+    }
+
+    const { surveyId } = req.params;
+
+    const result = await db.query(
+      `
+      UPDATE surveys
+      SET
+        is_archived = TRUE,
+        archived_at = NOW(),
+        updated_at = NOW()
+      WHERE id = $1
+      AND is_archived = FALSE
+      RETURNING id, name
+      `,
+      [surveyId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'survey_not_found_or_already_archived',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `Survey ${surveyId} archived successfully`,
+      survey: result.rows[0],
+    });
+  } catch (e) {
+    console.error('Archive survey error:', e);
+
+    return res.status(500).json({
+      success: false,
+      error: 'internal_server_error',
+    });
+  }
+});
+
+
+
+app.patch('/admin/survey/:surveyId/unarchive', async (req, res) => {
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+
+    if (!db) {
+      throw new Error('Database not initialized');
+    }
+
+    const { surveyId } = req.params;
+
+    const result = await db.query(
+      `
+      UPDATE surveys
+      SET
+        is_archived = FALSE,
+        archived_at = NULL,
+        updated_at = NOW()
+      WHERE id = $1
+      AND is_archived = TRUE
+      RETURNING id, name
+      `,
+      [surveyId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'survey_not_found_or_not_archived',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `Survey ${surveyId} restored successfully`,
+      survey: result.rows[0],
+    });
+  } catch (e) {
+    console.error('Unarchive survey error:', e);
+
+    return res.status(500).json({
+      success: false,
+      error: 'internal_server_error',
+    });
+  }
+});
+
+
+
+
+app.get('/admin/surveys/archived', async (req, res) => {
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+
+    if (!db) {
+      throw new Error('Database not initialized');
+    }
+
+    const result = await db.query(
+      `
+      SELECT
+        id,
+        name,
+        mode,
+        description,
+        status,
+        archived_at,
+        created_at,
+        updated_at
+      FROM surveys
+      WHERE is_archived = TRUE
+      ORDER BY archived_at DESC
+      `
+    );
+
+    return res.json({
+      success: true,
+      count: result.rowCount,
+      surveys: result.rows,
+    });
+  } catch (e) {
+    console.error('Get archived surveys error:', e);
+
+    return res.status(500).json({
+      success: false,
+      error: 'internal_server_error',
+    });
+  }
+});
+
+
+app.delete('/admin/survey/:surveyId', async (req, res) => {
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+
+    if (!db) throw new Error("Database not initialized");
+
+    const { surveyId } = req.params;
+
+    // 1. Check if the survey exists first
+    const check = await db.query('SELECT 1 FROM surveys WHERE id = $1', [surveyId]);
+    
+    if (check.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'survey_not_found',
+        message: `No survey found with ID: ${surveyId}`
+      });
+    }
+
+    // 2. Delete the survey
+    // Note: If you used 'ON DELETE CASCADE' in your DB init script for foreign keys,
+    // deleting from 'surveys' will automatically clean up 'survey_sessions' and 'survey_responses'.
+    await db.query('DELETE FROM surveys WHERE id = $1', [surveyId]);
+
+    console.log(`🗑️ Deleted survey: ${surveyId}`);
+
+    return res.json({
+      success: true,
+      message: `Survey ${surveyId} and all associated data deleted successfully.`
+    });
+
+  } catch (e) {
+    console.error('❌ Delete error:', e);
+    return res.status(500).json({
+      success: false,
+      error: 'internal_server_error',
+      details: e instanceof Error ? e.message : 'Unknown error'
+    });
+  }
+});
+
+
+
+
+
+app.get('/admin/escalations', async (req, res) => {
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+
+    const { query, values } = buildAdminListQuery(
+      `SELECT * FROM escalations`,
+      {
+        statusColumn: 'ticket_status',
+        archivedColumn: 'is_archived',
+        filters: req.query as any
       }
-      throw err;
-    }
+    );
+
+    const result = await db.query(query, values);
+
+    return res.json({
+      count: result.rows.length,
+      escalations: result.rows
+    });
+
   } catch (e) {
-    console.error('Failed to delete survey file', e);
+    console.error(e);
     return res.status(500).json({ error: 'failed' });
   }
 });
-
-// DELETE survey data from DB (responses + sessions) and remove manual file if present
-app.delete('/admin/survey/:surveyId', async (req: Request, res: Response) => {
-  const surveyId = req.params.surveyId;
-  try {
-    const storage = mastra.getStorage() as any;
-    const db = storage?.db;
-    if (!db) return res.status(500).json({ error: 'DB not initialized' });
-
-    // Delete responses and sessions for this survey
-    try {
-      await db.query('BEGIN');
-      await db.query('DELETE FROM survey_responses WHERE survey_id = $1', [surveyId]);
-      await db.query('DELETE FROM survey_sessions WHERE survey_id = $1', [surveyId]);
-      await db.query('COMMIT');
-    } catch (e) {
-      try { await db.query('ROLLBACK'); } catch (_) {}
-      throw e;
-    }
-
-    // Also attempt to remove a manual file if present
-    const filePath = path.join(process.cwd(), 'data', `${surveyId}.json`);
-    let fileDeleted = false;
-    try {
-      await fs.unlink(filePath);
-      fileDeleted = true;
-    } catch (err: any) {
-      if (err.code !== 'ENOENT') throw err;
-    }
-
-    return res.json({ success: true, surveyId, fileDeleted });
-  } catch (e) {
-    console.error('Failed to delete survey data', e);
-    return res.status(500).json({ error: 'failed' });
-  }
-});
-
-// ---------------- Escalation endpoints ----------------
-// GET /admin/escalations?status=pending|completed
-app.get('/admin/escalations', async (req: Request, res: Response) => {
-  try {
-    const status = (req.query.status as string) || undefined;
-    const storage = mastra.getStorage() as any;
-    const db = storage?.db;
-    if (!db) return res.status(500).json({ error: 'DB not initialized' });
-
-    const allowed = ['pending', 'completed'];
-    if (status && !allowed.includes(status)) {
-      return res.status(400).json({ error: `Invalid status. Allowed: ${allowed.join(',')}` });
-    }
-
-    const rows = await escalationService.getEscalations(db, status);
-    return res.json({ escalations: rows });
-  } catch (e) {
-    console.error('Failed to fetch escalations', e);
-    return res.status(500).json({ error: 'failed' });
-  }
-});
-
 
 app.post('/admin/escalation/:ticketId/message', async (req: Request, res: Response) => {
   try {
@@ -1926,6 +2618,324 @@ app.post('/admin/escalation/message', async (req: Request, res: Response) => {
   }
 });
 
+app.post('/admin/escalation/:ticketId/release', async (req: Request, res: Response) => {
+  try {
+    const rawTicketId = req.params.ticketId;
+    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
+
+    if (!ticketId) {
+      return res.status(400).json({ error: 'ticketId is required' });
+    }
+
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) {
+      return res.status(500).json({ error: 'DB not initialized' });
+    }
+
+    const ticket = await escalationService.getEscalationByTicketId(db, ticketId);
+    if (!ticket) {
+      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
+    }
+
+    if (ticket.ticket_status !== 'pending') {
+      return res.status(409).json({ error: 'Only pending escalations can be released back to the bot' });
+    }
+
+    const updated = await escalationService.setHumanAgentActive(db, ticketId, false);
+    if (!updated) {
+      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      ticketId,
+      ticketStatus: updated.ticket_status,
+      humanAgentActive: updated.human_agent_active,
+    });
+  } catch (e) {
+    console.error('Failed to release human handoff', e);
+    return res.status(500).json({ error: 'Failed to release human handoff' });
+  }
+});
+
+app.get('/admin/escalation/:ticketId/messages', async (req: Request, res: Response) => {
+  try {
+    const rawTicketId = req.params.ticketId;
+    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
+    const directionRaw = req.query.direction;
+    const limitRaw = req.query.limit;
+
+    if (!ticketId) {
+      return res.status(400).json({ error: 'ticketId is required' });
+    }
+
+    const direction = typeof directionRaw === 'string' ? directionRaw.trim().toLowerCase() : undefined;
+    if (direction && !['inbound', 'outbound'].includes(direction)) {
+      return res.status(400).json({ error: 'direction must be one of: inbound, outbound' });
+    }
+
+    const limit = typeof limitRaw === 'string' ? Number.parseInt(limitRaw, 10) : 50;
+    if (!Number.isFinite(limit) || limit < 1 || limit > 200) {
+      return res.status(400).json({ error: 'limit must be an integer between 1 and 200' });
+    }
+
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) {
+      return res.status(500).json({ error: 'DB not initialized' });
+    }
+
+    const ticket = await escalationService.getEscalationByTicketId(db, ticketId);
+    if (!ticket) {
+      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
+    }
+
+    const messages = await escalationService.getEscalationMessages(
+      db,
+      ticketId,
+      direction as 'inbound' | 'outbound' | undefined,
+      limit
+    );
+
+    return res.status(200).json({
+      ticketId,
+      count: messages.length,
+      messages,
+    });
+  } catch (e) {
+    console.error('Failed to fetch escalation messages', e);
+    return res.status(500).json({ error: 'Failed to fetch escalation messages' });
+  }
+});
+
+// body: { ticketId?: string, ticketStatus?: 'pending'|'completed', to?: string, message?: string }
+app.post('/admin/escalation/:ticketId/resolve', async (req: Request, res: Response) => {
+  try {
+    const rawTicketId = req.params.ticketId;
+    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
+
+    const { ticketStatus, to, message } = req.body || {};
+
+    if (!ticketId) {
+      return res.status(400).json({ error: 'ticketId is required' });
+    }
+
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+
+    if (!db) {
+      return res.status(500).json({ error: 'DB not initialized' });
+    }
+
+    try {
+      const result = await escalationService.notifyAndMaybeUpdate({
+        db,
+        ticketId,
+        ticketStatus: ticketStatus || 'completed',
+        to,
+        message,
+        sendMessage: async (t: string, m: string) =>
+          sendWhatsAppMessage({ to: t, message: m }),
+      });
+
+      return res.status(200).json({
+        success: true,
+        ticketId,
+        status: ticketStatus || 'completed',
+        ...result,
+      });
+
+    } catch (err: any) {
+      if (err.message === 'Invalid ticketStatus') {
+        return res.status(400).json({
+          error: 'Invalid ticketStatus. Allowed values: pending, completed',
+        });
+      }
+
+      if (err.message === 'customer_phone (to) is required') {
+        return res.status(400).json({
+          error: 'customer_phone (to) is required or not found for ticketId',
+        });
+      }
+
+      if (err.message === 'not_found') {
+        return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
+      }
+
+      console.error('Failed to resolve escalation', err);
+      return res.status(500).json({ error: 'Failed to resolve escalation' });
+    }
+
+  } catch (e) {
+    console.error('Failed to resolve escalation', e);
+    return res.status(500).json({ error: 'Failed to resolve escalation' });
+  }
+});
+
+// delete /admin/escalation/:ticketId - could be added to remove escalations if needed, but not implemented here for safety
+app.delete('/admin/escalation/:ticketId', async (req, res) => {
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+
+    const { ticketId } = req.params;
+
+    const result = await db.query(
+      `
+      UPDATE escalations
+      SET
+        is_archived = TRUE,
+        archived_at = NOW(),
+        updated_at = NOW()
+      WHERE ticket_id = $1
+        AND is_archived = FALSE
+      RETURNING ticket_id, ticket_status
+      `,
+      [ticketId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({
+        error: 'escalation_not_found_or_already_archived',
+      });
+    }
+
+    return res.json({
+      success: true,
+      ticketId,
+      archived: true,
+    });
+
+  } catch (e) {
+    console.error('Archive escalation error:', e);
+    return res.status(500).json({ error: 'Failed to archive escalation' });
+  }
+});
+
+app.delete('/admin/escalation/:ticketId/purge', async (req: Request, res: Response) => {
+  try {
+    const rawTicketId = req.params.ticketId;
+    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
+
+    if (!ticketId) {
+      return res.status(400).json({ error: 'ticketId is required' });
+    }
+
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+
+    if (!db) {
+      return res.status(500).json({ error: 'DB not initialized' });
+    }
+
+    // Optional safety: only allow deleting resolved tickets
+    const existing = await db.query(
+      'SELECT ticket_id, ticket_status FROM escalations WHERE ticket_id = $1',
+      [ticketId]
+    );
+
+    if (!existing.rows.length) {
+      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
+    }
+
+    const escalation = existing.rows[0];
+
+    if (escalation.ticket_status !== 'completed') {
+      return res.status(400).json({
+        error: 'Only completed escalations can be deleted',
+      });
+    }
+
+    // 🧨 Actual delete
+    await db.query('DELETE FROM escalations WHERE ticket_id = $1', [ticketId]);
+
+    return res.status(200).json({
+      success: true,
+      ticketId,
+      deleted: true,
+    });
+
+  } catch (e) {
+    console.error('Failed to delete escalation', e);
+    return res.status(500).json({ error: 'Failed to delete escalation' });
+  }
+});
+
+app.patch('/admin/escalation/:ticketId/unarchive', async (req, res) => {
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+
+    const { ticketId } = req.params;
+
+    const result = await db.query(
+      `
+      UPDATE escalations
+      SET
+        is_archived = FALSE,
+        archived_at = NULL,
+        updated_at = NOW()
+      WHERE ticket_id = $1
+        AND is_archived = TRUE
+      RETURNING ticket_id
+      `,
+      [ticketId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({
+        error: 'escalation_not_found_or_not_archived',
+      });
+    }
+
+    return res.json({
+      success: true,
+      ticketId,
+      restored: true,
+    });
+
+  } catch (e) {
+    console.error('Unarchive escalation error:', e);
+    return res.status(500).json({ error: 'Failed to restore escalation' });
+  }
+});
+
+
+app.get('/admin/escalations/archived', async (req, res) => {
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+
+    const result = await db.query(`
+      SELECT *
+      FROM escalations
+      WHERE is_archived = TRUE
+      ORDER BY archived_at DESC
+    `);
+
+    return res.json({
+      count: result.rows.length,
+      escalations: result.rows,
+    });
+
+  } catch (e) {
+    console.error('Get archived escalations error:', e);
+    return res.status(500).json({ error: 'Failed to fetch archived escalations' });
+  }
+});
+
+
+
+
+
+
 app.get('/admin/chat-history/messages', async (req: Request, res: Response) => {
   try {
     const storage = mastra.getStorage() as any;
@@ -2046,219 +3056,144 @@ app.get('/admin/chat-history/threads', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/admin/escalation/:ticketId/release', async (req: Request, res: Response) => {
-  try {
-    const rawTicketId = req.params.ticketId;
-    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
-
-    if (!ticketId) {
-      return res.status(400).json({ error: 'ticketId is required' });
-    }
-
-    const storage = mastra.getStorage() as any;
-    const db = storage?.db;
-    if (!db) {
-      return res.status(500).json({ error: 'DB not initialized' });
-    }
-
-    const ticket = await escalationService.getEscalationByTicketId(db, ticketId);
-    if (!ticket) {
-      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
-    }
-
-    if (ticket.ticket_status !== 'pending') {
-      return res.status(409).json({ error: 'Only pending escalations can be released back to the bot' });
-    }
-
-    const updated = await escalationService.setHumanAgentActive(db, ticketId, false);
-    if (!updated) {
-      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
-    }
-
-    return res.status(200).json({
-      success: true,
-      ticketId,
-      ticketStatus: updated.ticket_status,
-      humanAgentActive: updated.human_agent_active,
-    });
-  } catch (e) {
-    console.error('Failed to release human handoff', e);
-    return res.status(500).json({ error: 'Failed to release human handoff' });
-  }
-});
-
-app.get('/admin/escalation/:ticketId/messages', async (req: Request, res: Response) => {
-  try {
-    const rawTicketId = req.params.ticketId;
-    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
-    const directionRaw = req.query.direction;
-    const limitRaw = req.query.limit;
-
-    if (!ticketId) {
-      return res.status(400).json({ error: 'ticketId is required' });
-    }
-
-    const direction = typeof directionRaw === 'string' ? directionRaw.trim().toLowerCase() : undefined;
-    if (direction && !['inbound', 'outbound'].includes(direction)) {
-      return res.status(400).json({ error: 'direction must be one of: inbound, outbound' });
-    }
-
-    const limit = typeof limitRaw === 'string' ? Number.parseInt(limitRaw, 10) : 50;
-    if (!Number.isFinite(limit) || limit < 1 || limit > 200) {
-      return res.status(400).json({ error: 'limit must be an integer between 1 and 200' });
-    }
-
-    const storage = mastra.getStorage() as any;
-    const db = storage?.db;
-    if (!db) {
-      return res.status(500).json({ error: 'DB not initialized' });
-    }
-
-    const ticket = await escalationService.getEscalationByTicketId(db, ticketId);
-    if (!ticket) {
-      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
-    }
-
-    const messages = await escalationService.getEscalationMessages(
-      db,
-      ticketId,
-      direction as 'inbound' | 'outbound' | undefined,
-      limit
-    );
-
-    return res.status(200).json({
-      ticketId,
-      count: messages.length,
-      messages,
-    });
-  } catch (e) {
-    console.error('Failed to fetch escalation messages', e);
-    return res.status(500).json({ error: 'Failed to fetch escalation messages' });
-  }
-});
 
 
-// body: { ticketId?: string, ticketStatus?: 'pending'|'completed', to?: string, message?: string }
-app.post('/admin/escalation/:ticketId/resolve', async (req: Request, res: Response) => {
-  try {
-    const rawTicketId = req.params.ticketId;
-    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
-
-    const { ticketStatus, to, message } = req.body || {};
-
-    if (!ticketId) {
-      return res.status(400).json({ error: 'ticketId is required' });
-    }
-
-    const storage = mastra.getStorage() as any;
-    const db = storage?.db;
-
-    if (!db) {
-      return res.status(500).json({ error: 'DB not initialized' });
-    }
-
-    try {
-      const result = await escalationService.notifyAndMaybeUpdate({
-        db,
-        ticketId,
-        ticketStatus: ticketStatus || 'completed',
-        to,
-        message,
-        sendMessage: async (t: string, m: string) =>
-          sendWhatsAppMessage({ to: t, message: m }),
-      });
-
-      return res.status(200).json({
-        success: true,
-        ticketId,
-        status: ticketStatus || 'completed',
-        ...result,
-      });
-
-    } catch (err: any) {
-      if (err.message === 'Invalid ticketStatus') {
-        return res.status(400).json({
-          error: 'Invalid ticketStatus. Allowed values: pending, completed',
-        });
-      }
-
-      if (err.message === 'customer_phone (to) is required') {
-        return res.status(400).json({
-          error: 'customer_phone (to) is required or not found for ticketId',
-        });
-      }
-
-      if (err.message === 'not_found') {
-        return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
-      }
-
-      console.error('Failed to resolve escalation', err);
-      return res.status(500).json({ error: 'Failed to resolve escalation' });
-    }
-
-  } catch (e) {
-    console.error('Failed to resolve escalation', e);
-    return res.status(500).json({ error: 'Failed to resolve escalation' });
-  }
-});
 
 // ─── Admin - Meta Survey Routes ──────────────────────────────────────────────
-
 app.post('/admin/meta-survey', async (req: Request, res: Response) => {
   try {
-    const { name, description, surveyId, thankYouText, questions, autoPublish, dataEndpointUrl } = req.body || {};
+    const {
+      name,
+      description,
+      surveyId,
+      thankYouText,
+      questions,
+      autoPublish,
+      dataEndpointUrl,
+    } = req.body || {};
 
     if (!name || !Array.isArray(questions) || questions.length === 0) {
-      return res.status(400).json({ error: 'name and questions (non-empty array) are required' });
+      return res.status(400).json({
+        error: 'name and questions (non-empty array) are required',
+      });
     }
 
     const serverUrl = (process.env.SERVER_URL || '').replace(/\/$/, '');
-    const endpointUrl = dataEndpointUrl || `${serverUrl}/webhook/meta-flow-data`;
+    const endpointUrl =
+      dataEndpointUrl || `${serverUrl}/webhook/meta-flow-data`;
 
     if (!endpointUrl.startsWith('https://')) {
       return res.status(400).json({
-        error: 'dataEndpointUrl must be a valid HTTPS URL. Set the SERVER_URL env var or pass dataEndpointUrl in the body.',
+        error:
+          'dataEndpointUrl must be a valid HTTPS URL. Set SERVER_URL or pass dataEndpointUrl.',
       });
     }
 
+    // validate questions
     for (const q of questions) {
       if (!q.id || !q.text || !q.type) {
-        return res.status(400).json({ error: `Each question must have id, text, and type. Invalid: ${JSON.stringify(q)}` });
+        return res.status(400).json({
+          error: `Each question must have id, text, and type`,
+        });
       }
-      if (['list', 'button'].includes(q.type) && (!Array.isArray(q.options) || q.options.length === 0)) {
-        return res.status(400).json({ error: `Question "${q.id}" of type "${q.type}" must have a non-empty options array` });
+
+      if (
+        ['list', 'button'].includes(q.type) &&
+        (!Array.isArray(q.options) || q.options.length === 0)
+      ) {
+        return res.status(400).json({
+          error: `Question "${q.id}" must have options`,
+        });
       }
     }
-
-    const flowJson = buildSurveyFlowJson({ id: surveyId, name, description, questions, thankYouText }, endpointUrl);
-    const flowJsonBuffer = Buffer.from(JSON.stringify(flowJson, null, 2));
-
-    const flowId = await createMetaFlow(name, ['SURVEY']);
-    const uploadResult = await uploadFlowJsonBuffer(flowId, flowJsonBuffer);
 
     const storage = mastra.getStorage() as any;
     const db = storage?.db;
     if (!db) throw new Error('DB not initialized');
 
+    // 1. CREATE META FLOW ON META SIDE
+    const flowJson = buildSurveyFlowJson(
+      { id: surveyId, name, description, questions, thankYouText },
+      endpointUrl
+    );
+
+    const flowJsonBuffer = Buffer.from(JSON.stringify(flowJson, null, 2));
+
+    const uniqueName = `${name} - ${
+      surveyId || crypto.randomBytes(3).toString('hex')
+    }`;
+
+    const flowId = await createMetaFlow(uniqueName, ['SURVEY']);
+
+    await uploadFlowJsonBuffer(flowId, flowJsonBuffer);
+
+    // 2. SAVE TO MASTER SURVEYS TABLE (IMPORTANT FIX)
+    const finalSurveyId =
+      surveyId || `meta_${crypto.randomUUID().slice(0, 12)}`;
+
+    await db.query(
+      `
+      INSERT INTO surveys (
+        id,
+        name,
+        mode,
+        description,
+        questions_data,
+        status,
+        is_archived,
+        archived_at
+      )
+      VALUES ($1, $2, 'meta', $3, $4, 'active', FALSE, NULL)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        description = EXCLUDED.description,
+        questions_data = EXCLUDED.questions_data,
+        updated_at = NOW()
+      `,
+      [
+        finalSurveyId,
+        name,
+        description || null,
+        JSON.stringify(questions),
+      ]
+    );
+
+    // 3. SAVE META FLOW CONFIG
     await metaSurveyService.upsertMetaFlowSurvey(db, {
-      flowId, flowName: name, surveyId: surveyId || null,
-      questionsData: questions, status: 'draft', dataEndpointUrl: endpointUrl,
+      flowId,
+      flowName: name,
+      surveyId: finalSurveyId,
+      questionsData: questions,
+      status: 'draft',
+      dataEndpointUrl: endpointUrl,
     });
 
+    // 4. OPTIONAL PUBLISH
     let publishResult: any = null;
+
     if (autoPublish) {
-      publishResult = await publishFlow(flowId);
-      await metaSurveyService.markFlowPublished(db, flowId);
+      try {
+        publishResult = await publishFlow(flowId);
+        await metaSurveyService.markFlowPublished(db, flowId);
+      } catch (err) {
+        console.error('Publish failed:', err);
+      }
     }
 
     return res.status(201).json({
-      success: true, flowId, surveyId: surveyId || null,
+      success: true,
+      surveyId: finalSurveyId,
+      flowId,
       status: autoPublish ? 'published' : 'draft',
-      dataEndpointUrl: endpointUrl, uploadResult, publishResult,
+      dataEndpointUrl: endpointUrl,
+      publishResult,
     });
   } catch (e: any) {
     console.error('POST /admin/meta-survey failed', e);
-    return res.status(500).json({ error: e.message || 'Failed to create meta survey' });
+
+    return res.status(500).json({
+      error: e.message || 'Failed to create meta survey',
+    });
   }
 });
 
@@ -2292,6 +3227,7 @@ app.get('/admin/meta-survey/:flowId', async (req: Request, res: Response) => {
   }
 });
 
+
 app.post('/admin/meta-survey/:flowId/publish', async (req: Request, res: Response) => {
   const { flowId } = req.params;
   try {
@@ -2308,6 +3244,7 @@ app.post('/admin/meta-survey/:flowId/publish', async (req: Request, res: Respons
     return res.status(500).json({ error: e.message || 'Publish failed' });
   }
 });
+
 
 app.post('/admin/meta-survey/:flowId/deprecate', async (req: Request, res: Response) => {
   const { flowId } = req.params;
@@ -2336,7 +3273,13 @@ app.delete('/admin/meta-survey/:flowId', async (req: Request, res: Response) => 
       return res.status(400).json({ error: 'Published flows cannot be hard-deleted. Use DELETE /admin/meta-survey/:flowId/delete-published instead.' });
     }
     await deleteFlow(flowId);
+
+
     await metaSurveyService.deleteMetaFlowSurveyRecord(db, flowId);
+
+    
+
+
     return res.status(200).json({ success: true, flowId, deleted: true });
   } catch (e: any) {
     console.error(`DELETE /admin/meta-survey/${flowId} failed`, e);
@@ -2344,7 +3287,7 @@ app.delete('/admin/meta-survey/:flowId', async (req: Request, res: Response) => 
   }
 });
 
-app.delete('/admin/meta-survey/:flowId/delete-published', async (req: Request, res: Response) => {
+app.delete('/admin/meta-survey/:flowId/delete-published/archived', async (req: Request, res: Response) => {
   const { flowId } = req.params;
   try {
     const storage = mastra.getStorage() as any;
@@ -2363,15 +3306,34 @@ app.delete('/admin/meta-survey/:flowId/delete-published', async (req: Request, r
       await metaSurveyService.markFlowDeprecated(db, flowId);
     }
 
-    await metaSurveyService.deleteMetaFlowSurveyRecord(db, flowId);
+    await metaSurveyService.archiveMetaFlowSurvey(db, flowId);
+
     return res.status(200).json({ success: true, flowId, deletedSurvey: true, responsesDeleted: false });
   } catch (e: any) {
-    console.error(`DELETE /admin/meta-survey/${flowId}/delete-published failed`, e);
+    console.error(`DELETE /admin/meta-survey/${flowId}/delete-published/archived failed`, e);
     return res.status(500).json({ error: e.message || 'Delete published flow failed' });
   }
 });
 
-app.delete('/admin/meta-survey/:flowId/delete-with-responses', async (req: Request, res: Response) => {
+
+app.get('/admin/meta-survey/archived', async (req, res) => {
+  const storage = mastra.getStorage() as any;
+  const db = storage?.db;
+
+  const result = await db.query(`
+    SELECT *
+    FROM meta_flow_surveys
+    WHERE is_archived = TRUE
+    ORDER BY archived_at DESC
+  `);
+
+  return res.json({
+    count: result.rows.length,
+    surveys: result.rows
+  });
+});
+
+app.delete('/admin/meta-survey/:flowId/delete-with-responses/purge', async (req: Request, res: Response) => {
   const { flowId } = req.params;
   try {
     const storage = mastra.getStorage() as any;
@@ -2404,7 +3366,7 @@ app.delete('/admin/meta-survey/:flowId/delete-with-responses', async (req: Reque
   }
 });
 
-app.post('/api/crm/meta-survey/send', async (req: Request, res: Response) => {
+app.post('/admin/meta-survey/send', async (req: Request, res: Response) => {
   try {
     const { to, flowId, flowToken, cta, headerText, bodyText, footerText, phoneNumberId } = req.body || {};
     if (!to || !flowId) {
@@ -2478,10 +3440,11 @@ app.post('/api/crm/meta-survey/send', async (req: Request, res: Response) => {
       results,
     });
   } catch (e: any) {
-    console.error('POST /api/crm/meta-survey/send failed', e);
+    console.error('POST /admin/meta-survey/send failed', e);
     return res.status(500).json({ error: e.message || 'Failed to send flow message' });
   }
 });
+
 
 // POST /webhook/meta-flow-data — WhatsApp Flow Data Endpoint
 // Meta calls this during flow execution for INIT and data_exchange actions.
@@ -2528,7 +3491,7 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/meta-survey/responses', async (req: Request, res: Response) => {
+app.get('/admin/meta-survey/responses', async (req: Request, res: Response) => {
   try {
     const storage = mastra.getStorage() as any;
     const db = storage?.db;
@@ -2548,60 +3511,13 @@ app.get('/api/meta-survey/responses', async (req: Request, res: Response) => {
 
     return res.status(200).json({ count: responses.length, total, limit, offset, responses });
   } catch (e: any) {
-    console.error('GET /api/meta-survey/responses failed', e);
+    console.error('GET /admin/meta-survey/responses failed', e);
     return res.status(500).json({ error: e.message || 'Failed to query responses' });
   }
 });
 
-// delete /admin/escalation/:ticketId - could be added to remove escalations if needed, but not implemented here for safety
-app.delete('/admin/escalation/:ticketId', async (req: Request, res: Response) => {
-  try {
-    const rawTicketId = req.params.ticketId;
-    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
 
-    if (!ticketId) {
-      return res.status(400).json({ error: 'ticketId is required' });
-    }
 
-    const storage = mastra.getStorage() as any;
-    const db = storage?.db;
-
-    if (!db) {
-      return res.status(500).json({ error: 'DB not initialized' });
-    }
-
-    // Optional safety: only allow deleting resolved tickets
-    const existing = await db.query(
-      'SELECT ticket_id, ticket_status FROM escalations WHERE ticket_id = $1',
-      [ticketId]
-    );
-
-    if (!existing.rows.length) {
-      return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
-    }
-
-    const escalation = existing.rows[0];
-
-    if (escalation.ticket_status !== 'completed') {
-      return res.status(400).json({
-        error: 'Only completed escalations can be deleted',
-      });
-    }
-
-    // 🧨 Actual delete
-    await db.query('DELETE FROM escalations WHERE ticket_id = $1', [ticketId]);
-
-    return res.status(200).json({
-      success: true,
-      ticketId,
-      deleted: true,
-    });
-
-  } catch (e) {
-    console.error('Failed to delete escalation', e);
-    return res.status(500).json({ error: 'Failed to delete escalation' });
-  }
-});
 
 
 

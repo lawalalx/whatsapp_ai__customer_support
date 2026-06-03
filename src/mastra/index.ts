@@ -58,7 +58,7 @@ const routes = [
 
   /* -------------------------- SEND SINGLE SURVEY -------------------------- */
 
-  registerApiRoute("api/crm/send-survey", {
+  registerApiRoute("admin/send-survey", {
     method: "POST",
     handler: async (c) => {
       const body = await c.req.json().catch(() => null);
@@ -109,7 +109,7 @@ const routes = [
   }),
 
   /* -------------------------- BULK SURVEY SEND ---------------------------- */
-  registerApiRoute("api/crm/bulk-send-survey", {
+  registerApiRoute("admin/bulk-send-survey", {
     method: "POST",
     handler: async (c) => {
       const body = await c.req.json().catch(() => null);
@@ -162,27 +162,8 @@ const routes = [
     },
   }),
 
-  /* -------------------------- META FLOW CREATION -------------------------- */
-  registerApiRoute("api/crm/create-meta-flow", {
-    method: "POST",
-    handler: async (c) => {
-      const body = await c.req.json().catch(() => null);
-
-      try {
-        const flowId = await createMetaFlow(body?.name || "survey_flow");
-
-        await uploadFlowJson(flowId, "./survey.json");
-        await publishFlow(flowId);
-
-        return c.json({ success: true, flowId });
-      } catch (error) {
-        return c.json({ error: (error as Error).message }, 500);
-      }
-    },
-  }),
-
   /* -------------------------- GET SURVEY RESPONSES ------------------------ */
-  registerApiRoute("api/crm/survey-responses", {
+  registerApiRoute("admin/survey-responses", {
     method: "GET",
     handler: async (c) => {
       const surveyId        = c.req.query("surveyId");
@@ -234,23 +215,9 @@ const routes = [
         return c.json({ responses: [] });
       }
     },
-  }),
+  })
 
-  /* -------------------------- META RESPONSES (STUB) ------------------------ */
-  registerApiRoute("api/crm/meta-survey-responses", {
-    method: "GET",
-    handler: async () => {
-      return new Response(
-        JSON.stringify({
-          responses: [],
-          note: "Not implemented",
-        }),
-        { status: 200 }
-      );
-    },
-  }),
 ];
-
 
 
 

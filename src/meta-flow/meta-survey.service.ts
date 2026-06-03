@@ -102,12 +102,17 @@ export async function markFlowDeprecated(db: any, flowId: string): Promise<void>
 }
 
 /** Retrieve all registered meta flow surveys */
-export async function listMetaFlowSurveys(db: any): Promise<MetaFlowSurveyRow[]> {
-  const sql = `SELECT * FROM meta_flow_surveys ORDER BY created_at DESC`;
-  if (typeof db.any === 'function') return db.any(sql);
-  const result = await db.query(sql);
+export async function listMetaFlowSurveys(db: any) {
+  const result = await db.query(`
+    SELECT *
+    FROM meta_flow_surveys
+    WHERE is_archived = FALSE
+    ORDER BY created_at DESC
+  `);
+
   return result.rows;
 }
+
 
 /** Retrieve a single meta flow survey by its Meta flow_id */
 export async function getMetaFlowSurveyByFlowId(
@@ -129,6 +134,27 @@ export async function deleteMetaFlowSurveyRecord(db: any, flowId: string): Promi
     await db.query(sql, [flowId]);
   }
 }
+
+
+export async function archiveMetaFlowSurvey(db: any, flowId: string) {
+  const result = await db.query(
+    `
+    UPDATE meta_flow_surveys
+    SET
+      is_archived = TRUE,
+      archived_at = NOW(),
+      updated_at = NOW()
+    WHERE flow_id = $1
+      AND is_archived = FALSE
+    RETURNING flow_id
+    `,
+    [flowId]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+
 
 /** Delete all responses for a flow from local DB */
 export async function deleteMetaFlowResponsesByFlowId(db: any, flowId: string): Promise<void> {
