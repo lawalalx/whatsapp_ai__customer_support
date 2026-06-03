@@ -1,8 +1,6 @@
 
 
 import "dotenv/config";
-import fs from 'fs/promises';
-import path from 'path';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import crypto from "crypto";
@@ -1033,43 +1031,6 @@ const swaggerDocument = {
     },
 
 
-    '/admin/surveys/archived': {
-      get: {
-        summary: 'Get all archived surveys',
-        tags: ['Admin - AI/Manual Survey'],
-        description: `
-          Retrieves all archived surveys.
-
-          Archived surveys are surveys that have been soft-deleted
-          using the archive endpoint.
-
-          This endpoint returns:
-          - Survey metadata
-          - Survey status
-          - Archive timestamp
-          - Creation and update timestamps
-
-          Archived surveys:
-          - Are hidden from normal survey listings
-          - Cannot be used for new survey campaigns
-          - Can be restored using the unarchive endpoint
-
-          This endpoint is useful for:
-          - Audit and compliance reviews
-          - Survey recovery workflows
-          - Administrative reporting
-        `,
-        responses: {
-          '200': {
-            description: 'Archived surveys retrieved successfully'
-          },
-          '500': {
-            description: 'Failed to retrieve archived surveys'
-          }
-        }
-      }
-    },
-
   '/admin/survey/{surveyId}': {
 
     delete: {
@@ -1340,17 +1301,23 @@ const swaggerDocument = {
       }
     }
   },
-  '/admin/escalation/{ticketId}/resolve': {
+
+  '/admin/escalation/{ticketId}/status': {
     post: {
-      summary: 'Resolve escalation',
+      summary: 'Resolve or update escalation status',
       tags: ['Admin - Escalation'],
       description: `
-      Marks an escalation (human handoff / ticket) as completed in the database.
+      Updates an escalation (ticket) status and optionally sends a notification message.
 
-      Useful for:
-      - Closing completed tickets
-      - Updating ticket status
+      Supports:
+      - Resolve ticket (completed)
+      - Reopen ticket (pending)
+      - Silent update (no message sent)
+      - Notify customer when needed
+
+      If sendMessage is false, the ticket is updated silently without sending WhatsApp messages.
       `,
+
       parameters: [
         {
           name: 'ticketId',
@@ -1366,22 +1333,36 @@ const swaggerDocument = {
           'application/json': {
             schema: {
               type: 'object',
+              required: ['ticketStatus'],
               properties: {
                 ticketStatus: {
                   type: 'string',
                   enum: ['pending', 'completed'],
                   example: 'completed',
-                  description: 'Status to set (default: completed)'
+                  description: 'Status to set for the ticket'
                 },
+
+                sendMessage: {
+                  type: 'boolean',
+                  example: true,
+                  default: false,
+                  description:
+                    'If true, sends WhatsApp notification to customer. If false, updates ticket silently.'
+                },
+
                 to: {
                   type: 'string',
                   example: '+2348012345678',
-                  description: 'Customer phone number for notification'
+                  description:
+                    'Customer phone number (required only if sendMessage is true)'
                 },
+
                 message: {
                   type: 'string',
-                  example: 'Your issue has been resolved successfully.',
-                  description: 'Optional message to send to customer'
+                  example:
+                    'Your issue has been resolved successfully.',
+                  description:
+                    'Message to send to customer (required only if sendMessage is true)'
                 }
               }
             }
@@ -1390,10 +1371,21 @@ const swaggerDocument = {
       },
 
       responses: {
-        '200': { description: 'Escalation resolved successfully' },
-        '400': { description: 'Invalid request' },
-        '404': { description: 'Escalation not found. Probably deleted' },
-        '500': { description: 'Failed to resolve escalation' }
+        '200': {
+          description: 'Escalation status updated successfully'
+        },
+        '400': {
+          description:
+            'Invalid request (missing ticketId or invalid ticketStatus)'
+        },
+        '404': {
+          description:
+            'Escalation not found or already deleted'
+        },
+        '500': {
+          description:
+            'Failed to update escalation'
+        }
       }
     }
   },
@@ -2237,7 +2229,6 @@ app.post('/admin/survey', async (req: Request, res: Response) => {
   }
 });
 
-
 app.get('/admin/surveys', async (req, res) => {
   const storage = mastra.getStorage() as any;
   const db = storage?.db;
@@ -2245,20 +2236,23 @@ app.get('/admin/surveys', async (req, res) => {
   const { query, values } = buildAdminListQuery(
     `SELECT * FROM surveys`,
     {
+      modeColumn: 'mode',
       statusColumn: 'status',
       archivedColumn: 'is_archived',
-      filters: req.query as any
+      filters: req.query as any,
     }
   );
+
+  console.log('QUERY:', query);
+  console.log('VALUES:', values);
 
   const result = await db.query(query, values);
 
   return res.json({
     count: result.rows.length,
-    surveys: result.rows
+    surveys: result.rows,
   });
 });
-
 
 
 
@@ -2350,50 +2344,6 @@ app.patch('/admin/survey/:surveyId/unarchive', async (req, res) => {
     });
   } catch (e) {
     console.error('Unarchive survey error:', e);
-
-    return res.status(500).json({
-      success: false,
-      error: 'internal_server_error',
-    });
-  }
-});
-
-
-
-
-app.get('/admin/surveys/archived', async (req, res) => {
-  try {
-    const storage = mastra.getStorage() as any;
-    const db = storage?.db;
-
-    if (!db) {
-      throw new Error('Database not initialized');
-    }
-
-    const result = await db.query(
-      `
-      SELECT
-        id,
-        name,
-        mode,
-        description,
-        status,
-        archived_at,
-        created_at,
-        updated_at
-      FROM surveys
-      WHERE is_archived = TRUE
-      ORDER BY archived_at DESC
-      `
-    );
-
-    return res.json({
-      success: true,
-      count: result.rowCount,
-      surveys: result.rows,
-    });
-  } catch (e) {
-    console.error('Get archived surveys error:', e);
 
     return res.status(500).json({
       success: false,
@@ -2710,15 +2660,26 @@ app.get('/admin/escalation/:ticketId/messages', async (req: Request, res: Respon
 });
 
 // body: { ticketId?: string, ticketStatus?: 'pending'|'completed', to?: string, message?: string }
-app.post('/admin/escalation/:ticketId/resolve', async (req: Request, res: Response) => {
+app.post('/admin/escalation/:ticketId/status', async (req: Request, res: Response) => {
   try {
     const rawTicketId = req.params.ticketId;
     const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
 
-    const { ticketStatus, to, message } = req.body || {};
+    const {
+      ticketStatus,
+      to,
+      message,
+      sendMessage = false, //  NEW FLAG
+    } = req.body || {};
 
     if (!ticketId) {
       return res.status(400).json({ error: 'ticketId is required' });
+    }
+
+    if (!ticketStatus || !['pending', 'completed'].includes(ticketStatus)) {
+      return res.status(400).json({
+        error: 'ticketStatus must be pending or completed',
+      });
     }
 
     const storage = mastra.getStorage() as any;
@@ -2728,48 +2689,38 @@ app.post('/admin/escalation/:ticketId/resolve', async (req: Request, res: Respon
       return res.status(500).json({ error: 'DB not initialized' });
     }
 
-    try {
-      const result = await escalationService.notifyAndMaybeUpdate({
-        db,
-        ticketId,
-        ticketStatus: ticketStatus || 'completed',
-        to,
-        message,
-        sendMessage: async (t: string, m: string) =>
-          sendWhatsAppMessage({ to: t, message: m }),
-      });
+    const result = await escalationService.notifyAndMaybeUpdate({
+      db,
+      ticketId,
+      ticketStatus,
+      to,
+      message,
 
-      return res.status(200).json({
-        success: true,
-        ticketId,
-        status: ticketStatus || 'completed',
-        ...result,
-      });
+      //  ONLY SEND IF TRUE
+      sendMessage: sendMessage
+      ? async (t: string, m: string): Promise<boolean> => {
+          try {
+            await sendWhatsAppMessage({ to: t, message: m });
+            return true;
+          } catch (err) {
+            console.error('Failed to send WhatsApp message:', err);
+            return false;
+          }
+        }
+      : undefined
+    });
 
-    } catch (err: any) {
-      if (err.message === 'Invalid ticketStatus') {
-        return res.status(400).json({
-          error: 'Invalid ticketStatus. Allowed values: pending, completed',
-        });
-      }
+    return res.status(200).json({
+      success: true,
+      ticketId,
+      status: ticketStatus,
+      messageSent: sendMessage,
+      ...result,
+    });
 
-      if (err.message === 'customer_phone (to) is required') {
-        return res.status(400).json({
-          error: 'customer_phone (to) is required or not found for ticketId',
-        });
-      }
-
-      if (err.message === 'not_found') {
-        return res.status(404).json({ error: 'The escalation with this ID is not found. Probably deleted' });
-      }
-
-      console.error('Failed to resolve escalation', err);
-      return res.status(500).json({ error: 'Failed to resolve escalation' });
-    }
-
-  } catch (e) {
-    console.error('Failed to resolve escalation', e);
-    return res.status(500).json({ error: 'Failed to resolve escalation' });
+  } catch (err) {
+    console.error('Failed to update escalation', err);
+    return res.status(500).json({ error: 'Failed to update escalation' });
   }
 });
 

@@ -21,9 +21,12 @@ async function loadManualSurveyQuestions(surveyId?: string, mode?:  'manual' | '
     FROM surveys
     WHERE id = $1
     AND mode = $2
+    AND is_archived = FALSE
     `,
     [surveyId, mode || 'manual']
   );
+
+  // if survey is archived
 
   // --- THE FIX IS HERE ---
   // Access result.rows instead of result directly
@@ -31,6 +34,8 @@ async function loadManualSurveyQuestions(surveyId?: string, mode?:  'manual' | '
     console.log(`❌ No survey found for ID: ${surveyId}`);
     return null;
   }
+
+  console.log(`\n\n✅ Loaded survey template for ID: ${surveyId}`, result.rows[0]);
 
   const questions = result.rows[0].questions_data;
   // -----------------------
@@ -138,7 +143,7 @@ const generateSurveyContent = createStep({
         INSERT INTO surveys (
           id,
           name,
-          type,
+          mode,
           questions_data
         )
         VALUES ($1, $2, $3, $4)
