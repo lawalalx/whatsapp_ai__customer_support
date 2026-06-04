@@ -77,13 +77,18 @@ const PORT =
 
 const URL =
   process.env.REMOTE_URL?.replace(/\/$/, '') ||
-  process.env.SERVER_URL?.replace(/\/$/, '');
+  process.env.REMOTE_URL?.replace(/\/$/, '');
 
 app.use(express.json());
 
 // Knowledge Base routes
 app.use('/api/kb/upload', kbUploadRoute);
 app.use('/api/kb/docs', kbDocsRoute);
+
+app.use((req, res, next) => {
+  res.setHeader('ngrok-skip-browser-warning', 'true');
+  next();
+});
 
 // Agent chat test route
 app.post('/api/agent/chat', async (req: Request, res: Response) => {
@@ -508,11 +513,22 @@ const swaggerDocument = {
         }
       },
       get: {
-        summary: 'List all registered Meta Flow surveys',
+        summary: 'List Meta Flow surveys (filterable)',
         tags: ['Admin - Meta Survey'],
-        description: 'Returns all Meta WhatsApp Flow surveys registered in the local DB, ordered by creation date descending.',
+        description: 'Returns Meta WhatsApp Flow surveys with optional filters. By default, only unarchived surveys are returned.',
+        parameters: [
+          { name: 'archived', in: 'query', required: false, schema: { type: 'boolean', default: false }, description: 'When true, returns archived surveys; default false (unarchived only).' },
+          { name: 'number', in: 'query', required: false, schema: { type: 'string' }, description: 'Fuzzy match against flow_id or survey_id.' },
+          { name: 'flowId', in: 'query', required: false, schema: { type: 'string' }, description: 'Exact Meta Flow ID filter.' },
+          { name: 'surveyId', in: 'query', required: false, schema: { type: 'string' }, description: 'Exact internal survey ID filter.' },
+          { name: 'from', in: 'query', required: false, schema: { type: 'string', format: 'date-time' }, description: 'Created-at start date (ISO 8601).' },
+          { name: 'to', in: 'query', required: false, schema: { type: 'string', format: 'date-time' }, description: 'Created-at end date (ISO 8601).' },
+          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', default: 50, maximum: 500 } },
+          { name: 'offset', in: 'query', required: false, schema: { type: 'integer', default: 0 } }
+        ],
         responses: {
-          '200': { description: 'Array of survey records' }
+          '200': { description: 'Filtered survey records with pagination metadata' },
+          '400': { description: 'Invalid query parameters' }
         }
       }
     },
@@ -572,89 +588,6 @@ const swaggerDocument = {
     }
   },
 
-  '/admin/meta-survey/archived': {
-    get: {
-      summary: 'Get all archived Meta Flow surveys',
-      tags: ['Admin - Meta Survey'],
-      description: `
-        Retrieves all Meta Flow surveys that have been archived (soft deleted).
-
-        These surveys:
-        - Are no longer active or visible in the main survey list
-        - Are preserved for audit and compliance purposes
-        - Can potentially be restored later (if unarchived endpoint is implemented)
-
-        This endpoint is useful for:
-        - Audit trails
-        - Compliance reporting (banking use case)
-        - Reviewing previously retired surveys
-        - Data governance and history tracking
-      `,
-      responses: {
-        '200': {
-          description: 'Archived Meta Flow surveys retrieved successfully',
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  count: {
-                    type: 'integer',
-                    example: 3
-                  },
-                  surveys: {
-                    type: 'array',
-                    items: {
-                      type: 'object',
-                      properties: {
-                        id: { type: 'string' },
-                        flow_id: { type: 'string' },
-                        flow_name: { type: 'string' },
-                        survey_id: { type: 'string', nullable: true },
-                        questions_data: {
-                          type: 'array',
-                          items: { type: 'object' }
-                        },
-                        status: {
-                          type: 'string',
-                          enum: ['draft', 'published', 'deprecated']
-                        },
-                        is_archived: {
-                          type: 'boolean',
-                          example: true
-                        },
-                        archived_at: {
-                          type: 'string',
-                          format: 'date-time',
-                          nullable: true
-                        },
-                        data_endpoint_url: {
-                          type: 'string',
-                          nullable: true
-                        },
-                        created_at: {
-                          type: 'string',
-                          format: 'date-time'
-                        },
-                        updated_at: {
-                          type: 'string',
-                          format: 'date-time'
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        '500': {
-          description: 'Failed to retrieve archived Meta Flow surveys'
-        }
-      }
-    }
-  },
-
   '/admin/meta-survey/{flowId}/delete-with-responses/purge': {
     delete: {
       summary: 'Dangerous! Delete a flow and all its saved responses',
@@ -678,7 +611,8 @@ const swaggerDocument = {
 
       The **\`flowToken\`** can be any non-empty string (for example \`first-survey\`).
       - If omitted, the server auto-generates one.
-      - If sending to multiple recipients, the server appends \`-1\`, \`-2\`, ... to keep each token unique for DB correlation.`,
+      - If sending to multiple recipients, the server appends \`-1\`, \`-2\`, ... to keep each token unique for DB correlation.
+      - If provided manually, it must be unique for each send context.`,
           requestBody: {
             required: true,
             content: {
@@ -695,7 +629,7 @@ const swaggerDocument = {
                       description: 'Recipient phone or list of recipient phones in E.164 without +.'
                     },
                     flowId: { type: 'string', example: '1234567890', description: 'Meta Flow ID returned by POST /admin/meta-survey' },
-                    flowToken: { type: 'string', example: 'first-survey', description: 'Optional base token. Can be any non-empty string. For bulk sends, server auto-suffixes per recipient for uniqueness.' },
+                    flowToken: { type: 'string', example: 'first-survey', description: 'Optional base token. Must be unique. For bulk sends, server auto-suffixes per recipient for uniqueness.' },
                     cta: { type: 'string', default: 'Take Survey', description: 'CTA button label (max 20 chars)' },
                     headerText: { type: 'string', description: 'Message header (max 60 chars)' },
                     bodyText: { type: 'string', description: 'Message body shown before the CTA button (max 1024 chars)' },
@@ -732,6 +666,7 @@ const swaggerDocument = {
           responses: {
             '200': { description: 'Message(s) sent (all or partial success)' },
             '400': { description: 'Validation error' },
+            '409': { description: 'flowToken already exists' },
             '500': { description: 'Send failed for all recipients' }
           }
         }
@@ -3068,6 +3003,8 @@ app.post('/admin/meta-survey', async (req: Request, res: Response) => {
       endpointUrl
     );
 
+    console.log("\n\nFINAL FLOW JSON:", JSON.stringify(flowJson, null, 2))
+
     const flowJsonBuffer = Buffer.from(JSON.stringify(flowJson, null, 2));
 
     const uniqueName = `${name} - ${
@@ -3153,11 +3090,62 @@ app.get('/admin/meta-survey', async (req: Request, res: Response) => {
     const storage = mastra.getStorage() as any;
     const db = storage?.db;
     if (!db) return res.status(500).json({ error: 'DB not initialized' });
-    const surveys = await metaSurveyService.listMetaFlowSurveys(db);
-    return res.status(200).json({ count: surveys.length, surveys });
+
+    const query = req.query as Record<string, string | undefined>;
+    const archived = query.archived === 'true';
+    const { number, flowId, surveyId, from, to } = query;
+    const limit = query.limit ? Math.min(Number.parseInt(query.limit, 10), 500) : 50;
+    const offset = query.offset ? Number.parseInt(query.offset, 10) : 0;
+
+    if (!Number.isFinite(limit) || limit < 1) {
+      return res.status(400).json({ error: 'limit must be a positive integer (max 500)' });
+    }
+
+    if (!Number.isFinite(offset) || offset < 0) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+
+    const [surveys, total] = await Promise.all([
+      metaSurveyService.queryMetaFlowSurveys(db, { archived, number, flowId, surveyId, from, to, limit, offset }),
+      metaSurveyService.countMetaFlowSurveys(db, { archived, number, flowId, surveyId, from, to }),
+    ]);
+
+    return res.status(200).json({
+      count: surveys.length,
+      total,
+      limit,
+      offset,
+      filters: { archived, number: number || null, flowId: flowId || null, surveyId: surveyId || null, from: from || null, to: to || null },
+      surveys,
+    });
   } catch (e: any) {
     console.error('GET /admin/meta-survey failed', e);
     return res.status(500).json({ error: e.message || 'Failed to list meta surveys' });
+  }
+});
+
+app.get('/admin/meta-survey/responses', async (req: Request, res: Response) => {
+  try {
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+
+    const { flowId, customerPhone, surveyId, source, from, to } = req.query as Record<string, string>;
+    const limit = req.query.limit ? Math.min(Number.parseInt(req.query.limit as string, 10), 500) : 50;
+    const offset = req.query.offset ? Number.parseInt(req.query.offset as string, 10) : 0;
+
+    if (!Number.isFinite(limit) || limit < 1) return res.status(400).json({ error: 'limit must be a positive integer (max 500)' });
+    if (!Number.isFinite(offset) || offset < 0) return res.status(400).json({ error: 'offset must be a non-negative integer' });
+
+    const [responses, total] = await Promise.all([
+      metaSurveyService.queryMetaFlowResponses(db, { flowId, customerPhone, surveyId, source, from, to, limit, offset }),
+      metaSurveyService.countMetaFlowResponses(db, { flowId, customerPhone, surveyId, source, from, to }),
+    ]);
+
+    return res.status(200).json({ count: responses.length, total, limit, offset, responses });
+  } catch (e: any) {
+    console.error('GET /admin/meta-survey/responses failed', e);
+    return res.status(500).json({ error: e.message || 'Failed to query responses' });
   }
 });
 
@@ -3181,15 +3169,47 @@ app.get('/admin/meta-survey/:flowId', async (req: Request, res: Response) => {
 
 app.post('/admin/meta-survey/:flowId/publish', async (req: Request, res: Response) => {
   const { flowId } = req.params;
+
   try {
     const storage = mastra.getStorage() as any;
     const db = storage?.db;
     if (!db) return res.status(500).json({ error: 'DB not initialized' });
+
     const local = await metaSurveyService.getMetaFlowSurveyByFlowId(db, flowId);
     if (!local) return res.status(404).json({ error: 'Survey not found in local database' });
+
+    // ✅ STEP 1 — REBUILD FLOW JSON
+    const endpointUrl = local.data_endpoint_url;
+    const flowJson = buildSurveyFlowJson(
+      {
+        name: local.flow_name,
+        description: '',
+        questions: local.questions_data,
+        thankYouText: '',
+      },
+      endpointUrl
+    );
+
+    console.log("RE-UPLOADING FLOW JSON:", JSON.stringify(flowJson, null, 2));
+
+    // ✅ STEP 2 — RE-UPLOAD (CRUCIAL FIX)
+    await uploadFlowJsonBuffer(
+      flowId,
+      Buffer.from(JSON.stringify(flowJson))
+    );
+
+    
+    const flowCheck = await getFlow(flowId);
+    console.log("✅ VALIDATION AFTER UPLOAD:", flowCheck.validation_errors);
+
+
+    // ✅ STEP 3 — NOW publish
     const result = await publishFlow(flowId);
+
     await metaSurveyService.markFlowPublished(db, flowId);
+
     return res.status(200).json({ success: true, flowId, result });
+
   } catch (e: any) {
     console.error(`POST /admin/meta-survey/${flowId}/publish failed`, e);
     return res.status(500).json({ error: e.message || 'Publish failed' });
@@ -3266,24 +3286,6 @@ app.delete('/admin/meta-survey/:flowId/delete-published/archived', async (req: R
   }
 });
 
-
-app.get('/admin/meta-survey/archived', async (req, res) => {
-  const storage = mastra.getStorage() as any;
-  const db = storage?.db;
-
-  const result = await db.query(`
-    SELECT *
-    FROM meta_flow_surveys
-    WHERE is_archived = TRUE
-    ORDER BY archived_at DESC
-  `);
-
-  return res.json({
-    count: result.rows.length,
-    surveys: result.rows
-  });
-});
-
 app.delete('/admin/meta-survey/:flowId/delete-with-responses/purge', async (req: Request, res: Response) => {
   const { flowId } = req.params;
   try {
@@ -3332,7 +3334,13 @@ app.post('/admin/meta-survey/send', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'at least one valid recipient is required in to' });
     }
 
-    const baseFlowToken = typeof flowToken === 'string' && flowToken.trim().length > 0
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+
+    const customFlowTokenProvided = typeof flowToken === 'string' && flowToken.trim().length > 0;
+
+    let baseFlowToken = customFlowTokenProvided
       ? flowToken.trim()
       : `flow-${Date.now()}-${randomUUID().slice(0, 8)}`;
 
@@ -3340,10 +3348,37 @@ app.post('/admin/meta-survey/send', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'flowToken must be 120 characters or fewer' });
     }
 
+    const buildTokens = (baseToken: string) => (
+      recipients.map((_, i) => (recipients.length === 1 ? baseToken : `${baseToken}-${i + 1}`))
+    );
+
+    let candidateTokens = buildTokens(baseFlowToken);
+
+    if (customFlowTokenProvided) {
+      const conflicts = await Promise.all(
+        candidateTokens.map((token) => metaSurveyService.isMetaFlowTokenUsed(db, token))
+      );
+      if (conflicts.some(Boolean)) {
+        return res.status(409).json({
+          error: 'flowToken already exists. Provide a unique flowToken or omit it to auto-generate one.',
+          baseFlowToken,
+        });
+      }
+    } else {
+      let guard = 0;
+      while (guard < 5) {
+        const conflicts = await Promise.all(
+          candidateTokens.map((token) => metaSurveyService.isMetaFlowTokenUsed(db, token))
+        );
+        if (!conflicts.some(Boolean)) break;
+        baseFlowToken = `flow-${Date.now()}-${randomUUID().slice(0, 8)}`;
+        candidateTokens = buildTokens(baseFlowToken);
+        guard += 1;
+      }
+    }
+
     const settled = await Promise.allSettled(recipients.map((phone, i) => {
-      const tokenForRecipient = recipients.length === 1
-        ? baseFlowToken
-        : `${baseFlowToken}-${i + 1}`;
+      const tokenForRecipient = candidateTokens[i];
 
       return sendFlowMessage({
         to: phone,
@@ -3357,9 +3392,29 @@ app.post('/admin/meta-survey/send', async (req: Request, res: Response) => {
       }).then((result) => ({ to: phone, flowToken: tokenForRecipient, result }));
     }));
 
+    const successfulDispatches = settled
+      .map((entry, idx) => ({ entry, idx }))
+      .filter(({ entry }) => entry.status === 'fulfilled');
+
+    if (successfulDispatches.length > 0) {
+      const localFlow = await metaSurveyService.getMetaFlowSurveyByFlowId(db, flowId);
+      await Promise.all(
+        successfulDispatches.map(async ({ idx }) => {
+          const phone = recipients[idx];
+          const tokenForRecipient = candidateTokens[idx];
+          await metaSurveyService.upsertMetaFlowTokenMap(db, {
+            flowToken: tokenForRecipient,
+            flowId,
+            surveyId: localFlow?.survey_id || undefined,
+            customerPhone: phone,
+          });
+        })
+      );
+    }
+
     const results = settled.map((entry, idx) => {
       const phone = recipients[idx];
-      const tokenForRecipient = recipients.length === 1 ? baseFlowToken : `${baseFlowToken}-${idx + 1}`;
+      const tokenForRecipient = candidateTokens[idx];
       if (entry.status === 'fulfilled') {
         return { success: true, to: phone, flowToken: tokenForRecipient, result: entry.value.result };
       }
@@ -3397,73 +3452,175 @@ app.post('/admin/meta-survey/send', async (req: Request, res: Response) => {
 });
 
 
-// POST /webhook/meta-flow-data — WhatsApp Flow Data Endpoint
-// Meta calls this during flow execution for INIT and data_exchange actions.
+
 app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
+  console.log('\n================================================');
+  console.log('🚀 META FLOW WEBHOOK HIT');
+  console.log('================================================');
+
   try {
-    // Production: Meta encrypts the request. Decrypt using FLOW_PRIVATE_KEY before reading body.
-    const body = req.body || {};
-    const { version = '3.0', action, screen, data, flow_token, flow_id } = body;
+    const {
+      encrypted_flow_data,
+      encrypted_aes_key,
+      initial_vector,
+    } = req.body;
 
-    console.log('[meta-flow-data] action=%s screen=%s token=%s', action, screen, flow_token);
+    // ─────────────────────────────────────────────
+    // 1️⃣ DECRYPT AES KEY (RSA)
+    // ─────────────────────────────────────────────
+    const privateKey = process.env.WHATSAPP_PRIVATE_KEY!
+      .replace(/\\n/g, '\n')
+      .trim();
 
-    if (action === 'INIT' || action === 'BACK') {
-      return res.status(200).json({ version, screen: screen || 'QUESTIONS', data: {} });
+    const aesKey = crypto.privateDecrypt(
+      {
+        key: privateKey,
+        padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+        oaepHash: 'sha256',
+      },
+      Buffer.from(encrypted_aes_key, 'base64')
+    );
+
+    // ─────────────────────────────────────────────
+    // 2️⃣ DECRYPT REQUEST PAYLOAD (AES-128-GCM)
+    // ─────────────────────────────────────────────
+    const iv = Buffer.from(initial_vector, 'base64');
+    const encryptedBuffer = Buffer.from(encrypted_flow_data, 'base64');
+
+    const tag = encryptedBuffer.slice(encryptedBuffer.length - 16);
+    const ciphertext = encryptedBuffer.slice(0, encryptedBuffer.length - 16);
+
+    const decipher = crypto.createDecipheriv(
+      'aes-128-gcm',
+      aesKey,
+      iv
+    );
+    decipher.setAuthTag(tag);
+
+    let decrypted = decipher.update(ciphertext, undefined, 'utf8');
+    decrypted += decipher.final('utf8');
+
+    const payload = JSON.parse(decrypted);
+
+    console.log('🎯 ACTION:', payload.action);
+
+    const flippedIv = Buffer.from(iv.map((byte) => ~byte));
+
+    const encryptResponse = (
+      responsePayload: Record<string, any>,
+      useIv: Buffer = flippedIv
+    ) => {
+      const cipher = crypto.createCipheriv(
+        'aes-128-gcm',
+        aesKey,
+        useIv
+      );
+
+      let encryptedRes = cipher.update(
+        JSON.stringify(responsePayload),
+        'utf8'
+      );
+      encryptedRes = Buffer.concat([encryptedRes, cipher.final()]);
+
+      const resTag = cipher.getAuthTag();
+
+      return Buffer.concat([
+        encryptedRes,
+        resTag,
+      ]).toString('base64');
+    };
+
+    // ─────────────────────────────────────────────
+    // 🔥 3️⃣ META HEALTH CHECK (PING / INIT)
+    // ─────────────────────────────────────────────
+    if (payload.action === 'ping') {
+      const responsePayload = {
+        data: {
+          status: 'active',
+        },
+      };
+
+      return res.status(200).type('text/plain').send(encryptResponse(responsePayload));
     }
 
-    if (action === 'data_exchange') {
-      const storage = mastra.getStorage() as any;
-      const db = storage?.db;
+    if (payload.action === 'INIT' || payload.action === 'BACK') {
+      const responsePayload = {
+        version: payload.version || '3.0',
+        screen: payload.screen || 'QUESTIONS',
+        data: {},
+      };
 
-      if (db && flow_id && flow_token && data && typeof data === 'object') {
-        let surveyId: string | undefined;
-        try {
-          const rec = await metaSurveyService.getMetaFlowSurveyByFlowId(db, flow_id);
-          surveyId = rec?.survey_id ?? undefined;
-        } catch (_) { /* non-fatal */ }
+      return res.status(200).type('text/plain').send(encryptResponse(responsePayload));
+    }
 
-        await metaSurveyService.saveMetaFlowResponse(db, {
-          flowId: flow_id,
-          flowToken: flow_token,
-          surveyId,
-          responses: data as Record<string, any>,
-          source: 'data_exchange',
-        });
-        console.log('[meta-flow-data] Saved response flow=%s token=%s', flow_id, flow_token);
+    if (payload.action === 'data_exchange') {
+      try {
+        const storage = mastra.getStorage() as any;
+        const db = storage?.db;
+
+        if (db) {
+          const flowToken = payload?.flow_token || payload?.data?.flow_token || payload?.context?.flow_token;
+          const payloadFlowId = payload?.flow_id || payload?.data?.flow_id || payload?.context?.flow_id;
+          const responseData = (payload?.data && typeof payload.data === 'object') ? payload.data : {};
+
+          if (flowToken) {
+            let flowId = payloadFlowId ? String(payloadFlowId) : 'unknown';
+            let surveyId: string | undefined;
+
+            if (flowId === 'unknown') {
+              try {
+                const tokenMap = await metaSurveyService.getMetaFlowTokenMapByToken(db, String(flowToken));
+                if (tokenMap?.flow_id) {
+                  flowId = tokenMap.flow_id;
+                }
+                surveyId = tokenMap?.survey_id || undefined;
+              } catch {
+                // non-fatal lookup failure
+              }
+            }
+
+            try {
+              if (!surveyId && flowId !== 'unknown') {
+                const localFlow = await metaSurveyService.getMetaFlowSurveyByFlowId(db, String(flowId));
+                surveyId = localFlow?.survey_id || undefined;
+              }
+            } catch {
+              // non-fatal lookup failure
+            }
+
+            await metaSurveyService.saveMetaFlowResponse(db, {
+              flowId: String(flowId),
+              flowToken: String(flowToken),
+              surveyId,
+              responses: responseData,
+              source: 'data_exchange',
+            });
+          }
+        }
+      } catch (saveErr) {
+        console.error('❌ Failed to save data_exchange response', saveErr);
       }
-
-      return res.status(200).json({ version, screen: 'COMPLETE', data: {} });
     }
 
-    return res.status(200).json({ version, screen: screen || 'INTRO', data: {} });
-  } catch (e: any) {
-    console.error('POST /webhook/meta-flow-data failed', e);
-    return res.status(200).json({ version: '3.0', screen: 'COMPLETE', data: {} });
-  }
-});
+    // ─────────────────────────────────────────────
+    // 4️⃣ BUILD NORMAL FLOW RESPONSE (PLAINTEXT)
+    // ─────────────────────────────────────────────
+    const responsePayload = {
+      version: payload.version || '3.0',
+      screen: 'COMPLETE',
+      data: {
+        acknowledgement: 'received',
+      },
+    };
 
-app.get('/admin/meta-survey/responses', async (req: Request, res: Response) => {
-  try {
-    const storage = mastra.getStorage() as any;
-    const db = storage?.db;
-    if (!db) return res.status(500).json({ error: 'DB not initialized' });
+    // ─────────────────────────────────────────────
+    // 6️⃣ NORMAL FLOW RESPONSE (BASE64 STRING)
+    // ─────────────────────────────────────────────
+    return res.status(200).type('text/plain').send(encryptResponse(responsePayload));
 
-    const { flowId, customerPhone, surveyId, source, from, to } = req.query as Record<string, string>;
-    const limit = req.query.limit ? Math.min(Number.parseInt(req.query.limit as string, 10), 500) : 50;
-    const offset = req.query.offset ? Number.parseInt(req.query.offset as string, 10) : 0;
-
-    if (!Number.isFinite(limit) || limit < 1) return res.status(400).json({ error: 'limit must be a positive integer (max 500)' });
-    if (!Number.isFinite(offset) || offset < 0) return res.status(400).json({ error: 'offset must be a non-negative integer' });
-
-    const [responses, total] = await Promise.all([
-      metaSurveyService.queryMetaFlowResponses(db, { flowId, customerPhone, surveyId, source, from, to, limit, offset }),
-      metaSurveyService.countMetaFlowResponses(db, { flowId, customerPhone, surveyId }),
-    ]);
-
-    return res.status(200).json({ count: responses.length, total, limit, offset, responses });
-  } catch (e: any) {
-    console.error('GET /admin/meta-survey/responses failed', e);
-    return res.status(500).json({ error: e.message || 'Failed to query responses' });
+  } catch (err: any) {
+    console.error('❌ META FLOW FAILURE', err);
+    return res.status(500).json({ error: err.message });
   }
 });
 

@@ -396,6 +396,30 @@ export const initDatabase = async () => {
         `
       );
 
+      await runMigration(
+        client,
+        '2026_06_meta_flow_token_map',
+        `
+          CREATE TABLE IF NOT EXISTS meta_flow_token_map (
+            flow_token      TEXT PRIMARY KEY,
+            flow_id         TEXT NOT NULL,
+            survey_id       TEXT,
+            customer_phone  TEXT,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_meta_flow_token_map_flow_id
+          ON meta_flow_token_map (flow_id);
+
+          CREATE INDEX IF NOT EXISTS idx_meta_flow_token_map_survey_id
+          ON meta_flow_token_map (survey_id);
+
+          CREATE INDEX IF NOT EXISTS idx_meta_flow_token_map_phone
+          ON meta_flow_token_map (customer_phone);
+        `
+      );
+
     client.release();
 
     console.log('✅ Database initialized successfully!');

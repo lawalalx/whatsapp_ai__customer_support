@@ -35,6 +35,15 @@ export interface MetaFlowResponseRow {
   created_at: string;
 }
 
+export interface MetaFlowTokenMapRow {
+  flow_token: string;
+  flow_id: string;
+  survey_id: string | null;
+  customer_phone: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ─── Survey CRUD ─────────────────────────────────────────────────────────────
 
 /** Insert or update a meta flow survey record */
@@ -113,6 +122,126 @@ export async function listMetaFlowSurveys(db: any) {
   return result.rows;
 }
 
+/** Query meta flow surveys with optional filters */
+export async function queryMetaFlowSurveys(
+  db: any,
+  params: {
+    archived?: boolean;
+    number?: string;
+    flowId?: string;
+    surveyId?: string;
+    limit?: number;
+    offset?: number;
+    from?: string;
+    to?: string;
+  },
+): Promise<MetaFlowSurveyRow[]> {
+  const conditions: string[] = [];
+  const values: any[] = [];
+
+  const archived = params.archived ?? false;
+  values.push(archived);
+  conditions.push(`is_archived = $${values.length}`);
+
+  if (params.flowId) {
+    values.push(params.flowId);
+    conditions.push(`flow_id = $${values.length}`);
+  }
+
+  if (params.surveyId) {
+    values.push(params.surveyId);
+    conditions.push(`survey_id = $${values.length}`);
+  }
+
+  if (params.number) {
+    values.push(`%${params.number}%`);
+    conditions.push(`(flow_id ILIKE $${values.length} OR survey_id ILIKE $${values.length})`);
+  }
+
+  if (params.from) {
+    values.push(params.from);
+    conditions.push(`created_at >= $${values.length}`);
+  }
+
+  if (params.to) {
+    values.push(params.to);
+    conditions.push(`created_at <= $${values.length}`);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limit = Math.min(params.limit ?? 50, 500);
+  const offset = params.offset ?? 0;
+
+  values.push(limit, offset);
+  const sql = `
+    SELECT *
+    FROM meta_flow_surveys
+    ${where}
+    ORDER BY created_at DESC
+    LIMIT $${values.length - 1} OFFSET $${values.length}
+  `;
+
+  if (typeof db.any === 'function') return db.any(sql, values);
+  const result = await db.query(sql, values);
+  return result.rows;
+}
+
+/** Count surveys with optional filters */
+export async function countMetaFlowSurveys(
+  db: any,
+  params: {
+    archived?: boolean;
+    number?: string;
+    flowId?: string;
+    surveyId?: string;
+    from?: string;
+    to?: string;
+  },
+): Promise<number> {
+  const conditions: string[] = [];
+  const values: any[] = [];
+
+  const archived = params.archived ?? false;
+  values.push(archived);
+  conditions.push(`is_archived = $${values.length}`);
+
+  if (params.flowId) {
+    values.push(params.flowId);
+    conditions.push(`flow_id = $${values.length}`);
+  }
+
+  if (params.surveyId) {
+    values.push(params.surveyId);
+    conditions.push(`survey_id = $${values.length}`);
+  }
+
+  if (params.number) {
+    values.push(`%${params.number}%`);
+    conditions.push(`(flow_id ILIKE $${values.length} OR survey_id ILIKE $${values.length})`);
+  }
+
+  if (params.from) {
+    values.push(params.from);
+    conditions.push(`created_at >= $${values.length}`);
+  }
+
+  if (params.to) {
+    values.push(params.to);
+    conditions.push(`created_at <= $${values.length}`);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const sql = `SELECT COUNT(*) AS total FROM meta_flow_surveys ${where}`;
+
+  if (typeof db.one === 'function') {
+    const row = await db.one(sql, values);
+    return Number(row.total);
+  }
+
+  const result = await db.query(sql, values);
+  return Number(result.rows[0]?.total ?? 0);
+}
+
 
 /** Retrieve a single meta flow survey by its Meta flow_id */
 export async function getMetaFlowSurveyByFlowId(
@@ -152,6 +281,94 @@ export async function archiveMetaFlowSurvey(db: any, flowId: string) {
   );
 
   return result.rows[0] ?? null;
+}
+
+/** Upsert mapping between a flow token and its flow id for later nfm_reply correlation */
+export async function upsertMetaFlowTokenMap(
+  db: any,
+  params: {
+    flowToken: string;
+    flowId: string;
+    surveyId?: string;
+    customerPhone?: string;
+  },
+): Promise<void> {
+  const { flowToken, flowId, surveyId, customerPhone } = params;
+
+  const sql = `
+    INSERT INTO meta_flow_token_map
+      (flow_token, flow_id, survey_id, customer_phone, created_at, updated_at)
+    VALUES ($1, $2, $3, $4, NOW(), NOW())
+    ON CONFLICT (flow_token) DO UPDATE SET
+      flow_id        = EXCLUDED.flow_id,
+      survey_id      = COALESCE(EXCLUDED.survey_id, meta_flow_token_map.survey_id),
+      customer_phone = COALESCE(EXCLUDED.customer_phone, meta_flow_token_map.customer_phone),
+      updated_at     = NOW()
+  `;
+
+  const values = [
+    flowToken,
+    flowId,
+    surveyId ?? null,
+    customerPhone ?? null,
+  ];
+
+  if (typeof db.none === 'function') {
+    await db.none(sql, values);
+    await db.none(
+      `
+        UPDATE meta_flow_responses
+        SET
+          flow_id = $2,
+          survey_id = COALESCE(meta_flow_responses.survey_id, $3)
+        WHERE flow_token = $1
+          AND flow_id = 'unknown'
+      `,
+      [flowToken, flowId, surveyId ?? null],
+    );
+  } else {
+    await db.query(sql, values);
+    await db.query(
+      `
+        UPDATE meta_flow_responses
+        SET
+          flow_id = $2,
+          survey_id = COALESCE(meta_flow_responses.survey_id, $3)
+        WHERE flow_token = $1
+          AND flow_id = 'unknown'
+      `,
+      [flowToken, flowId, surveyId ?? null],
+    );
+  }
+}
+
+/** Resolve flow id/survey id by flow token */
+export async function getMetaFlowTokenMapByToken(
+  db: any,
+  flowToken: string,
+): Promise<MetaFlowTokenMapRow | null> {
+  const sql = `SELECT * FROM meta_flow_token_map WHERE flow_token = $1 LIMIT 1`;
+  if (typeof db.oneOrNone === 'function') return db.oneOrNone(sql, [flowToken]);
+  const result = await db.query(sql, [flowToken]);
+  return result.rows[0] ?? null;
+}
+
+/** Check whether a flow token already exists in token map or responses */
+export async function isMetaFlowTokenUsed(db: any, flowToken: string): Promise<boolean> {
+  const sql = `
+    SELECT 1 AS hit FROM meta_flow_token_map WHERE flow_token = $1
+    UNION ALL
+    SELECT 1 AS hit FROM meta_flow_responses WHERE flow_token = $1
+    LIMIT 1
+  `;
+
+  if (typeof db.oneOrNone === 'function') {
+    const row = await db.oneOrNone(sql, [flowToken]);
+    return !!row;
+  }
+
+  const result = await db.query(sql, [flowToken]);
+  return (result.rows?.length ?? 0) > 0;
 }
 
 
@@ -264,7 +481,7 @@ export async function queryMetaFlowResponses(
 /** Count total responses (for pagination) */
 export async function countMetaFlowResponses(
   db: any,
-  params: { flowId?: string; customerPhone?: string; surveyId?: string },
+  params: { flowId?: string; customerPhone?: string; surveyId?: string; source?: string; from?: string; to?: string },
 ): Promise<number> {
   const conditions: string[] = [];
   const values: any[] = [];
@@ -277,6 +494,16 @@ export async function countMetaFlowResponses(
   if (params.flowId) add('flow_id', params.flowId);
   if (params.customerPhone) add('customer_phone', params.customerPhone);
   if (params.surveyId) add('survey_id', params.surveyId);
+  if (params.source) add('source', params.source);
+
+  if (params.from) {
+    values.push(params.from);
+    conditions.push(`created_at >= $${values.length}`);
+  }
+  if (params.to) {
+    values.push(params.to);
+    conditions.push(`created_at <= $${values.length}`);
+  }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const sql = `SELECT COUNT(*) AS total FROM meta_flow_responses ${where}`;

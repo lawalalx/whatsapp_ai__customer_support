@@ -5,6 +5,7 @@ import { handleSurveyMessage } from "../handlers/survey.handler.js";
 import escalationService from '../services/escalation-service.js';
 import chatHistoryService from '../services/chat-history-service.js';
 import { getActiveSurveySession } from "../services/session.service.js";
+import { decryptWhatsAppFlowData } from '../utils/encryption.helper.js';
 
 import { Mastra } from '@mastra/core';
 import { normalizePhone } from '../utils/format_phone.js';
@@ -98,36 +99,74 @@ export async function routeIncomingMessage({
   }
 
   // ── Meta Flow nfm_reply: user completed a WhatsApp Flow survey ───────────
-  // When a Flow ends with a `complete` action, Meta sends an nfm_reply
-  // through the regular webhook. Save the payload to meta_flow_responses.
   if (message?.type === 'interactive' && message?.interactive?.type === 'nfm_reply') {
     try {
       const nfmReply = message.interactive.nfm_reply;
-      const responseJson = nfmReply?.response_json;
+      let responseJson = nfmReply?.response_json;
+
+      // 2. CHECK FOR ENCRYPTION
+      if (nfmReply?.encrypted_flow_data) {
+        console.log('[router] Detected encrypted Flow data. Decrypting...');
+        try {
+            responseJson = decryptWhatsAppFlowData(
+              nfmReply.encrypted_flow_data,
+              nfmReply.encrypted_aes_key,
+              nfmReply.initial_vector
+            );
+        } catch (decryptErr) {
+            console.error('[router] Decryption failed!', decryptErr);
+            return; // Stop if we can't read the data
+        }
+      }
+
       if (responseJson) {
         const parsed: Record<string, any> = typeof responseJson === 'string'
           ? JSON.parse(responseJson)
           : responseJson;
 
         const flowToken = parsed?.flow_token;
-        const flowId = parsed?.flow_id;
+        const payloadFlowId = parsed?.flow_id;
 
         if (flowToken) {
           const { flow_token, flow_id, ...responseFields } = parsed;
+          let resolvedFlowId = payloadFlowId ? String(payloadFlowId) : 'unknown';
+          let surveyId: string | undefined;
+
+          if (resolvedFlowId === 'unknown') {
+            try {
+              const tokenMap = await metaSurveyService.getMetaFlowTokenMapByToken(db, String(flowToken));
+              if (tokenMap?.flow_id) {
+                resolvedFlowId = tokenMap.flow_id;
+              }
+              surveyId = tokenMap?.survey_id || undefined;
+            } catch {
+              // non-fatal lookup failure
+            }
+          }
+
+          if (!surveyId && resolvedFlowId !== 'unknown') {
+            try {
+              const localFlow = await metaSurveyService.getMetaFlowSurveyByFlowId(db, resolvedFlowId);
+              surveyId = localFlow?.survey_id || undefined;
+            } catch {
+              // non-fatal lookup failure
+            }
+          }
+
           await metaSurveyService.saveMetaFlowResponse(db, {
-            flowId: flowId || 'unknown',
+            flowId: resolvedFlowId,
             flowToken,
             customerPhone: normalizedPhone,
+            surveyId,
             responses: responseFields,
             source: 'nfm_reply',
           });
-          console.log('[router] nfm_reply saved: flow=%s phone=%s', flowId, normalizedPhone);
+          console.log('[router] nfm_reply saved (decrypted): flow=%s phone=%s', resolvedFlowId, normalizedPhone);
         }
       }
     } catch (err) {
-      console.error('[router] Failed to save nfm_reply response', err);
+      console.error('[router] Failed to handle nfm_reply response', err);
     }
-    // Do not continue routing for nfm_reply messages
     return;
   }
 

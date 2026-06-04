@@ -156,153 +156,155 @@ function buildQuestionComponent(q: MetaFlowQuestion): any[] {
  * @param dataEndpointUrl  Full HTTPS URL of your /webhook/meta-flow-data endpoint
  * @returns        Plain object ready for JSON.stringify and upload to Meta
  */
-export function buildSurveyFlowJson(
-  def: MetaFlowSurveyDefinition,
-  dataEndpointUrl: string,
-): object {
-  if (!def.questions || def.questions.length === 0) {
-    throw new Error('Survey must have at least one question');
-  }
-  if (!dataEndpointUrl || !dataEndpointUrl.startsWith('https://')) {
-    throw new Error('dataEndpointUrl must be a valid HTTPS URL');
-  }
 
-  // Build the form components for QUESTIONS screen
-  const formChildren: any[] = [];
 
-  for (const q of def.questions) {
-    // Add a question heading above every component for clarity
-    formChildren.push({
-      type: 'TextSubheading',
-      text: truncate(q.text, 80),
-    });
-    formChildren.push(...buildQuestionComponent(q));
-  }
+interface FlowQuestion {
+  id: string;
+  text: string;
+  type: 'list' | 'button' | 'text' | 'textarea' | 'date';
+  options?: string[];
+  required?: boolean;
+  placeholder?: string;
+}
 
-  // Footer (Submit button) using data_exchange to send to our data endpoint
-  const formPayload: Record<string, string> = {};
-  for (const q of def.questions) {
-    formPayload[q.id] = `\${form.${q.id}}`;
-  }
+interface FlowParams {
+  id?: string;
+  name: string;
+  description?: string;
+  questions: FlowQuestion[];
+  thankYouText?: string;
+}
 
-  formChildren.push({
-    type: 'Footer',
-    label: 'Submit Responses',
-    'on-click-action': {
-      name: 'data_exchange',
-      payload: formPayload,
-    },
+
+export function buildSurveyFlowJson(params: FlowParams, endpointUrl: string): any {
+  const { name, description, questions, thankYouText } = params;
+
+  // 1. Map questions to WhatsApp Flow components
+  const questionComponents = questions.map((q) => {
+    switch (q.type) {
+      case 'list':
+        return {
+          type: 'Dropdown',
+          label: q.text,
+          name: q.id,
+          required: q.required !== false,
+          'data-source': (q.options || []).map((opt) => ({
+            id: opt,
+            title: opt,
+          })),
+        };
+      case 'button':
+        return {
+          type: 'RadioButtonsGroup',
+          label: q.text,
+          name: q.id,
+          required: q.required !== false,
+          'data-source': (q.options || []).map((opt) => ({
+            id: opt,
+            title: opt,
+          })),
+        };
+      case 'text':
+        return {
+          type: 'TextInput',
+          label: q.text,
+          name: q.id,
+          required: q.required !== false,
+          placeholder: q.placeholder,
+        };
+      case 'textarea':
+        return {
+          type: 'TextArea',
+          label: q.text,
+          name: q.id,
+          required: q.required !== false,
+          // placeholder: q.placeholder,
+        };
+      case 'date':
+        return {
+          type: 'DatePicker',
+          label: q.text,
+          name: q.id,
+          required: q.required !== false,
+        };
+      default:
+        return {
+          type: 'TextBody',
+          text: q.text,
+        };
+    }
   });
 
-  // return {
-  //   version: '3.1',
-  //   data_api_version: '3.0',
-  //   data_channel_uri: dataEndpointUrl,
-  //   routing_model: {
-  //     INTRO: ['QUESTIONS'],
-  //     QUESTIONS: ['COMPLETE'],
-  //     COMPLETE: [],
-  //   },
+  // 2. Build the Flow JSON structure
   return {
     version: '7.0',
+    
+    // REQUIRED for data_exchange flows
     data_api_version: '3.0',
+
+    // data_channel_uri: endpointUrl,
+
+    // REQUIRED for navigation between screens
     routing_model: {
       INTRO: ['QUESTIONS'],
       QUESTIONS: ['COMPLETE'],
       COMPLETE: [],
     },
+
     screens: [
-      // ─── INTRO ───────────────────────────────────────────────────────
       {
         id: 'INTRO',
-        title: truncate(def.name, 30),
+        title: name,
         layout: {
           type: 'SingleColumnLayout',
           children: [
-            {
-              type: 'TextHeading',
-              text: truncate(def.name, 60),
-            },
-            {
-              type: 'TextBody',
-              text:
-                def.description ||
-                'Your feedback is important to us. This survey takes less than 2 minutes to complete.',
-            },
-            {
-              type: 'TextCaption',
-              text: `This survey has ${def.questions.length} question${def.questions.length !== 1 ? 's' : ''}.`,
-            },
+            { type: 'TextHeading', text: name },
+            { type: 'TextBody', text: description || 'Please complete this survey.' },
             {
               type: 'Footer',
               label: 'Start Survey',
               'on-click-action': {
                 name: 'navigate',
                 next: { type: 'screen', name: 'QUESTIONS' },
-                payload: {},
               },
             },
           ],
         },
       },
-
-      // ─── QUESTIONS ───────────────────────────────────────────────────
-        // {
-        //   id: 'QUESTIONS',
-        //   title: 'Survey Questions',
-        //   layout: {
-        //     type: 'SingleColumnLayout',
-        //     children: [
-        //       {
-        //         type: 'Form',
-        //         name: 'survey_form',
-        //         children: formChildren,
-        //       },
-        //     ],
-        //   },
-        // },
-
-
       {
         id: 'QUESTIONS',
-        title: 'Survey Questions',
+        title: 'Questions',
+        terminal: false,
         layout: {
           type: 'SingleColumnLayout',
           children: [
-            ...formChildren,
+            ...questionComponents,
             {
               type: 'Footer',
-              label: 'Submit Responses',
+              label: 'Submit',
               'on-click-action': {
-                name: 'data_exchange'
-              }
-            }
-          ]
-        }
+                name: 'data_exchange',
+                payload: questions.reduce((acc, q) => {
+                  acc[q.id] = `\${form.${q.id}}`;
+                  return acc;
+                }, {} as any),
+              },
+            },
+          ],
+        },
       },
-
-      // ─── COMPLETE (terminal) ─────────────────────────────────────────
       {
         id: 'COMPLETE',
+        title: 'Done',
         terminal: true,
-        success: true,
-        title: 'Thank You',
         layout: {
           type: 'SingleColumnLayout',
           children: [
-            {
-              type: 'TextHeading',
-              text: '🎉 Thank You!',
-            },
-            {
-              type: 'TextBody',
-              text:
-                def.thankYouText ||
-                'Your responses have been recorded. We truly appreciate your feedback!',
-            },
+            { type: 'TextHeading', text: 'Thank You!' },
+            { type: 'TextBody', text: thankYouText || 'Your feedback has been received.' },
             {
               type: 'Footer',
-              label: 'Done',
+              label: 'Close',
               'on-click-action': {
                 name: 'complete',
                 payload: {},

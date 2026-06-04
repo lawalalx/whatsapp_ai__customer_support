@@ -56,36 +56,99 @@ export async function uploadFlowJson(flowId: string, jsonPath: string): Promise<
 
 /** Upload Flow JSON from an in-memory Buffer (no temp file needed) */
 export async function uploadFlowJsonBuffer(flowId: string, jsonBuffer: Buffer): Promise<any> {
-  const url = `${META_GRAPH_URL}/${flowId}/assets`;
+  const url = `https://graph.facebook.com/v18.0/${flowId}/assets`;
+
   const form = new FormData();
+
   form.append('name', 'flow.json');
   form.append('asset_type', 'FLOW_JSON');
-  form.append('file', jsonBuffer, { filename: 'flow.json', contentType: 'application/json' });
+
+  // ✅ CRITICAL FIX
+  form.append('file', jsonBuffer, {
+    filename: 'flow.json',
+    contentType: 'application/json'
+  });
+
   const res = await fetch(url, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}` },
-    body: form,
+
+    // ✅ CRITICAL FIX — include form headers
+    headers: {
+      Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+      ...form.getHeaders()
+    },
+
+    body: form
   });
+
+  const data = await res.json();
+  console.log("✅ UPLOAD RESPONSE:", data);
+
   if (!res.ok) {
-    const err = await res.json() as any;
-    throw new Error(`Upload flow buffer failed: ${JSON.stringify(err)}`);
+    throw new Error(`Upload failed: ${JSON.stringify(data)}`);
   }
-  return await res.json() as any;
+
+  return data;
 }
 
-/** Publish a Flow (makes it live — cannot be unpublished, only deprecated) */
+
+
 export async function publishFlow(flowId: string): Promise<any> {
-  const url = `${META_GRAPH_URL}/${flowId}/publish`;
-  const res = await fetch(url, {
+  const META_GRAPH_URL = 'https://graph.facebook.com/v22.0';
+  const endpointUrl = `${process.env.SERVER_URL}/webhook/meta-flow-data`;
+
+  console.log("Setting endpoint_uri:", endpointUrl);
+
+  // STEP 1: Update Flow
+  const updateRes = await fetch(`${META_GRAPH_URL}/${flowId}`, {
+    method: 'POST',
+    headers: {
+      ...authHeader(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      endpoint_uri: endpointUrl,
+    }),
+  });
+
+  const updateData = await updateRes.json();
+  console.log("Update response:", updateData);
+
+  if (!updateRes.ok) {
+    throw new Error(`Pre-publish update failed: ${JSON.stringify(updateData)}`);
+  }
+
+
+  // 🛑 CRITICAL: Wait for Meta to propagate the URI change
+  console.log("⏳ Waiting 5 seconds for endpoint propagation...");
+  await new Promise(resolve => setTimeout(resolve, 5000));
+
+  //  STEP 1.5 — VERIFY WHAT META STORED
+  const verifyRes = await fetch(`${META_GRAPH_URL}/${flowId}`, {
+    method: 'GET',
+    headers: authHeader(),
+  });
+
+  const verifyData = await verifyRes.json();
+  console.log("Flow after update:", verifyData);
+
+  // STEP 2: Publish
+  const res = await fetch(`${META_GRAPH_URL}/${flowId}/publish`, {
     method: 'POST',
     headers: authHeader(),
   });
+
+  const data = await res.json();
+  console.log("Publish response:", data);
+
   if (!res.ok) {
-    const err = await res.json() as any;
-    throw new Error(`Publish flow failed: ${JSON.stringify(err)}`);
+    throw new Error(`Publish flow failed: ${JSON.stringify(data)}`);
   }
-  return await res.json();
+
+  return data;
 }
+
+
 
 /** Deprecate a published Flow (soft-delete; responses already collected are kept) */
 export async function deprecateFlow(flowId: string): Promise<any> {
