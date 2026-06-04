@@ -3383,6 +3383,9 @@ app.post('/admin/meta-survey/send', async (req: Request, res: Response) => {
     const db = storage?.db;
     if (!db) return res.status(500).json({ error: 'DB not initialized' });
 
+    const localFlow = await metaSurveyService.getMetaFlowSurveyByFlowId(db, flowId);
+    const flowMode = localFlow?.status === 'published' ? 'published' : 'draft';
+
     const customFlowTokenProvided = typeof flowToken === 'string' && flowToken.trim().length > 0;
 
     let baseFlowToken = customFlowTokenProvided
@@ -3499,10 +3502,6 @@ app.post('/admin/meta-survey/send', async (req: Request, res: Response) => {
 
 
 app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
-  console.log('\n================================================');
-  console.log('🚀 META FLOW WEBHOOK HIT');
-  console.log('================================================');
-
   try {
     const {
       encrypted_flow_data,
@@ -3598,61 +3597,6 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
       return res.status(200).type('text/plain').send(encryptResponse(responsePayload));
     }
 
-    // if (payload.action === 'data_exchange') {
-    //   try {
-    //     const storage = mastra.getStorage() as any;
-    //     const db = storage?.db;
-
-    //     if (db) {
-    //       const flowToken = payload?.flow_token || payload?.data?.flow_token || payload?.context?.flow_token;
-    //       const payloadFlowId = payload?.flow_id || payload?.data?.flow_id || payload?.context?.flow_id;
-    //       const responseData = (payload?.data && typeof payload.data === 'object') ? payload.data : {};
-          
-    //       console.log('\n\nReceived data_exchange payload with flowToken:', flowToken);
-    //       console.log('Payload responseData:', responseData, '\n\n');
-    //       if (flowToken) {
-    //         let flowId = payloadFlowId ? String(payloadFlowId) : 'unknown';
-    //         let surveyId: string | undefined;
-
-    //         if (flowId === 'unknown') {
-    //           try {
-    //             const tokenMap = await metaSurveyService.getMetaFlowTokenMapByToken(db, String(flowToken));
-    //             if (tokenMap?.flow_id) {
-    //               flowId = tokenMap.flow_id;
-    //             }
-    //             surveyId = tokenMap?.survey_id || undefined;
-    //           } catch {
-    //             // non-fatal lookup failure
-    //           }
-    //         }
-
-    //         try {
-    //           if (!surveyId && flowId !== 'unknown') {
-    //             const localFlow = await metaSurveyService.getMetaFlowSurveyByFlowId(db, String(flowId));
-    //             surveyId = localFlow?.survey_id || undefined;
-    //           }
-    //         } catch {
-    //           // non-fatal lookup failure
-    //         }
-
-    //         await metaSurveyService.saveMetaFlowResponse(db, {
-    //           flowId: String(flowId),
-    //           flowToken: String(flowToken),
-    //           surveyId,
-    //           responses: responseData,
-    //           source: 'data_exchange',
-    //         });
-    //       }
-    //     }
-    //   } catch (saveErr) {
-    //     console.error('❌ Failed to save data_exchange response', saveErr);
-    //   }
-    // }
-
-    // ─────────────────────────────────────────────
-    // 4️⃣ BUILD NORMAL FLOW RESPONSE (PLAINTEXT)
-    // ─────────────────────────────────────────────
-   
     if (payload.action === 'data_exchange') {
       try {
         const storage = mastra.getStorage() as any;
