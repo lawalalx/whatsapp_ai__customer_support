@@ -515,3 +515,20 @@ export async function countMetaFlowResponses(
   const result = await db.query(sql, values);
   return Number(result.rows[0]?.total ?? 0);
 }
+
+
+
+export function mapResponsesToQuestions(responses: Record<string, any>, questionsData: any[]) {
+  return Object.entries(responses).map(([key, value]) => {
+    // 1. Look for the question in your questions_data array
+    // Your FlowQuestion uses 'id' and 'text'
+    const question = questionsData.find(q => q.id === key || q.name === key);
+    
+    return {
+      field_id: key,
+      // Check .text (from your interface) first, then .label/.title as fallbacks
+      question_text: question ? (question.text || question.label || question.title) : key,
+      answer: value
+    };
+  });
+}
