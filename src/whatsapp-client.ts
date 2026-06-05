@@ -109,6 +109,165 @@ export async function sendWhatsAppMessage({ to, message, phoneNumberId }: SendMe
   return ok;
 }
 
+
+
+
+
+
+export interface WhatsAppTemplateData {
+  header?: string[];
+  body?: string[];
+  buttons?: string[];
+}
+
+export interface SendWhatsAppTemplateParams {
+  to: string;
+  templateId: string;
+  templateData?: WhatsAppTemplateData;
+  phoneNumberId?: string;
+}
+
+export async function sendWhatsAppTemplate({
+  to,
+  templateId,
+  templateData,
+  phoneNumberId,
+}: SendWhatsAppTemplateParams): Promise<boolean> {
+  console.log('sendWhatsAppTemplate called with:', {
+    to,
+    templateId,
+    templateData,
+  });
+
+  const toNormalized = normalizePhone(String(to));
+
+  const components: any[] = [];
+
+  // HEADER VARIABLES
+  if (templateData?.header?.length) {
+    components.push({
+      type: 'header',
+      parameters: templateData.header.map((value) => ({
+        type: 'text',
+        text: String(value),
+      })),
+    });
+  }
+
+  // BODY VARIABLES
+  if (templateData?.body?.length) {
+    components.push({
+      type: 'body',
+      parameters: templateData.body.map((value) => ({
+        type: 'text',
+        text: String(value),
+      })),
+    });
+  }
+
+  // URL BUTTON VARIABLES
+  if (templateData?.buttons?.length) {
+    templateData.buttons.forEach((value, index) => {
+      components.push({
+        type: 'button',
+        sub_type: 'url',
+        index: String(index),
+        parameters: [
+          {
+            type: 'text',
+            text: String(value),
+          },
+        ],
+      });
+    });
+  }
+
+  const templatePayload: any = {
+    name: templateId,
+    language: {
+      code: 'en',
+    },
+  };
+
+  if (components.length > 0) {
+    templatePayload.components = components;
+  }
+
+  const { ok, data } = await post(
+    {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: toNormalized,
+      type: 'template',
+      template: templatePayload,
+    },
+    { phoneNumberId }
+  );
+
+  console.log(
+    'WhatsApp API returned for sendWhatsAppTemplate:',
+    JSON.stringify(data, null, 2)
+  );
+
+  if (ok) {
+    const msgId = data?.messages?.[0]?.id;
+
+    if (msgId) {
+      console.log(
+        `✅ Template sent to ${toNormalized} (message_id: ${msgId})`
+      );
+    } else {
+      console.log(
+        `✅ Template sent to ${toNormalized}`
+      );
+    }
+  } else {
+    console.error(
+      '❌ WhatsApp template send failed:',
+      data
+    );
+  }
+
+  return ok;
+}
+
+
+
+
+export interface SendWhatsAppMessageOrTemplateParams {
+  to: string;
+  message?: string;
+  templateId?: string;
+  templateData?: WhatsAppTemplateData;
+
+  phoneNumberId?: string;
+}
+
+export async function sendWhatsAppMessageOrTemplate({
+  to,
+  message,
+  templateId,
+  templateData,
+  phoneNumberId,
+}: SendWhatsAppMessageOrTemplateParams): Promise<boolean> {
+  if (templateId) {
+    return sendWhatsAppTemplate({
+      to,
+      templateId,
+      templateData,
+      phoneNumberId,
+    });
+  }
+
+  return sendWhatsAppMessage({
+    to,
+    message: message || '',
+    phoneNumberId,
+  });
+}
+
+
+
 // ─── Mark message as read (turns grey ticks blue) ───────────────────────────
 // POST to /messages with status=read and the incoming message_id.
 export async function sendWhatsAppReadReceipt({ messageId, phoneNumberId }: { messageId: string; phoneNumberId?: string }): Promise<boolean> {
@@ -140,6 +299,7 @@ export async function sendWhatsAppReadReceipt({ messageId, phoneNumberId }: { me
     return false;
   }
 }
+
 
 // ─── Typing indicator ───────────────────────────────────────────────────────
 // Sends a typing indicator to the WhatsApp Cloud API.
@@ -348,39 +508,44 @@ export interface TemplateComponent {
   parameters?: TemplateParam[];
 }
 
-export interface SendTemplateParams {
-  to: string;
-  templateName: string;
-  languageCode: string;
-  components?: TemplateComponent[];
-  phoneNumberId?: string;
-}
 
-export async function sendWhatsAppTemplate({
-  to,
-  templateName,
-  languageCode,
-  components,
-  phoneNumberId,
-}: SendTemplateParams): Promise<boolean> {
-  const template: Record<string, unknown> = {
-    name: templateName,
-    language: { code: languageCode },
-  };
-  if (components && components.length > 0) {
-    template.components = components;
-  }
 
-  const { ok } = await post({
-    messaging_product: 'whatsapp',
-    recipient_type: 'individual',
-    to,
-    type: 'template',
-    template,
-  }, { phoneNumberId });
-  if (ok) console.log(`✅ Template "${templateName}" sent to ${to}`);
-  return ok;
-}
+// export interface SendTemplateParams {
+//   to: string;
+//   templateName: string;
+//   languageCode: string;
+//   components?: TemplateComponent[];
+//   phoneNumberId?: string;
+// }
+
+// export async function sendWhatsAppTemplate({
+//   to,
+//   templateName,
+//   languageCode,
+//   components,
+//   phoneNumberId,
+// }: SendTemplateParams): Promise<boolean> {
+//   const template: Record<string, unknown> = {
+//     name: templateName,
+//     language: { code: languageCode },
+//   };
+//   if (components && components.length > 0) {
+//     template.components = components;
+//   }
+
+//   const { ok } = await post({
+//     messaging_product: 'whatsapp',
+//     recipient_type: 'individual',
+//     to,
+//     type: 'template',
+//     template,
+//   }, { phoneNumberId });
+//   if (ok) console.log(`✅ Template "${templateName}" sent to ${to}`);
+//   return ok;
+// }
+
+
+
 
 // ─── 5. Mark message as read ─────────────────────────────────────────────────
 

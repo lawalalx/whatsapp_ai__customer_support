@@ -10,7 +10,7 @@ import { MastraServer } from '@mastra/express';
 import { mastra } from './mastra/index.js';
 
 import { normalizePhone } from './utils/format_phone.js';
-import { sendWhatsAppMessage, sendWhatsAppSurvey, sendWhatsAppReadReceipt } from './whatsapp-client.js';
+import { sendWhatsAppMessage, sendWhatsAppSurvey, sendWhatsAppReadReceipt, sendWhatsAppMessageOrTemplate } from './whatsapp-client.js';
 import { lastOutboundType, setLastOutbound } from './utils/outboundTracker.js';
 import escalationService from './services/escalation-service.js';
 import chatHistoryService from './services/chat-history-service.js';
@@ -1239,65 +1239,746 @@ const swaggerDocument = {
 
   '/admin/escalation/{ticketId}/status': {
     post: {
-      summary: 'Resolve or update escalation status',
+    summary: 'Update escalation status and optionally notify customer',
+    tags: ['Admin - Escalation'],
+    description: `
+    Updates an escalation ticket status and optionally sends a WhatsApp notification.
+    Supported operations:
+    - Mark ticket as completed
+    - Reopen ticket (pending)
+    - Silent status update (no customer notification)
+    - Send a normal WhatsApp text message
+    - Send a WhatsApp template message
+    Notification modes:
+    1. Plain Text Message
+      - Provide \`message\`
+      - Leave \`templateId\` empty
+    2. WhatsApp Template Message
+      - Provide \`templateId\`
+      - Provide \`templateData\` when the template contains placeholders
+      - Leave \`message\` empty
+    If \`sendMessage\` is false, the ticket status is updated without sending any WhatsApp notification.
+    `,
+    parameters: [
+      {
+        name: 'ticketId',
+        in: 'path',
+        required: true,
+        schema: {
+          type: 'string'
+        },
+        description: 'Escalation ticket identifier'
+      }
+    ],
+    requestBody: {
+      required: false,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['ticketStatus'],
+            properties: {
+              ticketStatus: {
+                type: 'string',
+                enum: ['pending', 'completed'],
+                example: 'completed',
+                description:
+                  'New status to assign to the escalation ticket'
+              },
+              sendMessage: {
+                type: 'boolean',
+                default: false,
+                example: true,
+                description:
+                  'When true, a WhatsApp notification is sent to the customer'
+              },
+              to: {
+                type: 'string',
+                example: '+2348012345678',
+                description:
+                  'Customer phone number. Required when sendMessage=true.'
+              },
+              message: {
+                type: 'string',
+                example:
+                  'Your issue has been resolved successfully.',
+                description:
+                  'Plain WhatsApp text message. Used only when templateId is not supplied.'
+              },
+              templateId: {
+                type: 'string',
+                example: 'ticketnotice',
+                description:
+                  'Approved WhatsApp template name. When supplied, a template message is sent instead of a plain text message.'
+              },
+              templateData: {
+                type: 'object',
+                description:
+                  'Values used to populate WhatsApp template placeholders.',
+                properties: {
+                  header: {
+                    type: 'array',
+                    items: {
+                      type: 'string'
+                    },
+                    example: ['ESC-12345'],
+                    description:
+                      'Header placeholder values ({{1}}, {{2}}, etc.)'
+                  },
+                  body: {
+                    type: 'array',
+                    items: {
+                      type: 'string'
+                    },
+                    example: [
+                      'John Doe',
+                      'Your ticket has been resolved'
+                    ],
+                    description:
+                      'Body placeholder values ({{1}}, {{2}}, etc.)'
+                  },
+                  buttons: {
+                    type: 'array',
+                    items: {
+                      type: 'string'
+                    },
+                    example: ['ESC-12345'],
+                    description:
+                      'Dynamic URL/button placeholder values'
+                  }
+                }
+              }
+            }
+          },
+         examples: {
+          textMessage: {
+            summary: 'Update ticket and send plain text message',
+            value: {
+              ticketStatus: 'completed',
+              sendMessage: true,
+              to: '+2348012345678',
+              message:
+                'Your issue has been resolved successfully.'
+            }
+          },
+          templateMessageSingleHeaderVariable: {
+            summary:
+              'Send template with a single header variable',
+            value: {
+              ticketStatus: 'completed',
+              sendMessage: true,
+              to: '+2348012345678',
+              templateId: 'ticketnotice',
+              templateData: {
+                header: ['ESC-12345']
+              }
+            }
+          },
+
+          templateMessageHeaderAndBodyVariables: {
+            summary:
+              'Send template with header and body variables',
+            value: {
+              ticketStatus: 'completed',
+              sendMessage: true,
+              to: '+2348012345678',
+              templateId: 'ticket_resolved',
+              templateData: {
+                header: ['ESC-12345'],
+                body: [
+                  'John Doe',
+                  'ESC-12345',
+                  'Your issue has been resolved successfully.'
+                ]
+              }
+            }
+          },
+
+          templateMessageMultipleBodyVariables: {
+            summary:
+              'Send template with multiple body placeholders',
+            value: {
+              ticketStatus: 'completed',
+              sendMessage: true,
+              to: '+2348012345678',
+              templateId: 'ticket_update',
+              templateData: {
+                body: [
+                  'John Doe',
+                  'ESC-12345',
+                  'Resolved',
+                  'REF-001',
+                  'Support Team'
+                ]
+              }
+            }
+          },
+
+          templateMessageWithButtonVariables: {
+            summary:
+              'Send template with dynamic URL/button placeholders',
+            value: {
+              ticketStatus: 'completed',
+              sendMessage: true,
+              to: '+2348012345678',
+              templateId: 'ticket_portal_link',
+              templateData: {
+                header: ['ESC-12345'],
+                body: [
+                  'John Doe'
+                ],
+                buttons: [
+                  'ESC-12345'
+                ]
+              }
+            }
+          },
+
+          reopenTicketAndNotifyCustomer: {
+            summary:
+              'Reopen ticket and notify customer using a template',
+            value: {
+              ticketStatus: 'pending',
+              sendMessage: true,
+              to: '+2348012345678',
+              templateId: 'ticket_reopened',
+              templateData: {
+                header: ['ESC-12345'],
+                body: [
+                  'John Doe',
+                  'Your ticket has been reopened and is under review.'
+                ]
+              }
+            }
+          },
+
+          silentUpdate: {
+            summary: 'Update ticket without notification',
+            value: {
+              ticketStatus: 'completed',
+              sendMessage: false
+            }
+          }
+        }
+        }
+      }
+    },
+    responses: {
+      '200': {
+        description:
+          'Escalation status updated successfully'
+      },
+      '400': {
+        description:
+          'Invalid request payload or validation error'
+      },
+      '404': {
+        description:
+          'Escalation ticket not found'
+      },
+      '500': {
+        description:
+          'Failed to update escalation'
+      }
+    }}},
+  // '/admin/escalation/{ticketId}/message': {
+  //   post: {
+  //     summary: 'Send human agent message',
+  //     tags: ['Admin - Escalation'],
+  //     description: `
+  //     Sends a WhatsApp message to the customer for an active escalation.
+
+  //     Useful for:
+  //     - Letting a human agent claim and continue a conversation after AI handoff
+  //     - Replying from a backend or supervisor console using the ticket created during escalation
+
+  //     The first human message automatically marks the ticket as human-owned,
+  //     so the bot stops replying only after a human agent has actually engaged.
+  //     `,
+  //     parameters: [
+  //       {
+  //         name: 'ticketId',
+  //         in: 'path',
+  //         required: true,
+  //         schema: { type: 'string' }
+  //       }
+  //     ],
+  //     requestBody: {
+  //       required: true,
+  //       content: {
+  //         'application/json': {
+  //           schema: {
+  //             type: 'object',
+  //             required: ['message'],
+  //             properties: {
+  //               message: {
+  //                 type: 'string',
+  //                 example: 'Hello, this is Ada from FBNBank support. I am now handling your request.',
+  //                 description: 'Message that the human agent wants to send to the customer'
+  //               },
+  //               to: {
+  //                 type: 'string',
+  //                 example: '+221770000000',
+  //                 description: 'Optional override for the customer phone number; defaults to the number stored on the ticket'
+  //               }
+  //             }
+  //           }
+  //         }
+  //       }
+  //     },
+  //     responses: {
+  //       '200': { description: 'Human agent message sent successfully' },
+  //       '400': { description: 'Invalid request payload' },
+  //       '404': { description: 'Escalation not found' },
+  //       '409': { description: 'Escalation is no longer active' },
+  //       '502': { description: 'WhatsApp delivery failed' },
+  //       '500': { description: 'Failed to send human agent message' }
+  //     }
+  //   }
+  // },
+
+  '/admin/escalation/{ticketId}/message': {
+    post: {
+    summary: 'Send human agent message',
+    tags: ['Admin - Escalation'],
+    description: `
+    Sends a WhatsApp message to the customer for an active escalation.
+
+    Useful for:
+    - Letting a human agent claim and continue a conversation after AI handoff
+    - Replying from a backend or supervisor console using the ticket created during escalation
+    - Sending approved WhatsApp template messages during ticket handling
+
+    The first human message automatically marks the ticket as human-owned,
+    so the bot stops replying only after a human agent has actually engaged.
+
+    Supported message types:
+
+    1. Plain Text Message
+      - Provide \`message\`
+      - Leave \`templateId\` empty
+
+    2. WhatsApp Template Message
+      - Provide \`templateId\`
+      - Provide \`templateData\` when the template contains placeholders
+      - Leave \`message\` empty
+    `,
+
+    parameters: [
+      {
+        name: 'ticketId',
+        in: 'path',
+        required: true,
+        schema: {
+          type: 'string'
+        },
+        description: 'Escalation ticket identifier'
+      }
+    ],
+
+    requestBody: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+
+            properties: {
+              message: {
+                type: 'string',
+                example:
+                  'Hello, this is Ada from FBNBank support. I am now handling your request.',
+                description:
+                  'Plain WhatsApp text message. Used only when templateId is not supplied.'
+              },
+
+              templateId: {
+                type: 'string',
+                example: 'ticketnotice',
+                description:
+                  'Approved WhatsApp template name.'
+              },
+
+              templateData: {
+                type: 'object',
+                description:
+                  'Values used to populate WhatsApp template placeholders.',
+
+                properties: {
+                  header: {
+                    type: 'array',
+                    items: {
+                      type: 'string'
+                    },
+                    example: ['ESC-12345'],
+                    description:
+                      'Header placeholder values ({{1}}, {{2}}, etc.)'
+                  },
+
+                  body: {
+                    type: 'array',
+                    items: {
+                      type: 'string'
+                    },
+                    example: [
+                      'John Doe',
+                      'ESC-12345',
+                      'Your issue has been resolved'
+                    ],
+                    description:
+                      'Body placeholder values ({{1}}, {{2}}, etc.)'
+                  },
+
+                  buttons: {
+                    type: 'array',
+                    items: {
+                      type: 'string'
+                    },
+                    example: ['ESC-12345'],
+                    description:
+                      'Dynamic URL/button placeholder values'
+                  }
+                }
+              },
+
+              to: {
+                type: 'string',
+                example: '+221770000000',
+                description:
+                  'Optional override for the customer phone number. Defaults to the phone number stored on the escalation ticket.'
+              }
+            }
+          },
+
+          examples: {
+            humanReply: {
+              summary:
+                'Human agent replies with a normal WhatsApp message',
+              value: {
+                message:
+                  'Hello, this is Ada from FBNBank support. I am now handling your request.'
+              }
+            },
+
+            templateMessageSingleHeaderVariable: {
+              summary:
+                'Send template with a single header variable',
+              value: {
+                templateId: 'ticketnotice',
+                templateData: {
+                  header: [
+                    'ESC-12345'
+                  ]
+                }
+              }
+            },
+
+            templateMessageHeaderAndBodyVariables: {
+              summary:
+                'Send template with header and body variables',
+              value: {
+                templateId: 'ticket_resolved',
+                templateData: {
+                  header: [
+                    'ESC-12345'
+                  ],
+                  body: [
+                    'John Doe',
+                    'ESC-12345',
+                    'Your issue has been resolved successfully.'
+                  ]
+                }
+              }
+            },
+
+            templateMessageMultipleBodyVariables: {
+              summary:
+                'Send template with multiple body placeholders',
+              value: {
+                templateId: 'ticket_update',
+                templateData: {
+                  body: [
+                    'John Doe',
+                    'ESC-12345',
+                    'Resolved',
+                    'REF-001',
+                    'Support Team'
+                  ]
+                }
+              }
+            },
+
+            templateMessageWithButtonVariables: {
+              summary:
+                'Send template with dynamic URL/button placeholders',
+              value: {
+                templateId: 'ticket_portal_link',
+                templateData: {
+                  header: [
+                    'ESC-12345'
+                  ],
+                  body: [
+                    'John Doe'
+                  ],
+                  buttons: [
+                    'ESC-12345'
+                  ]
+                }
+              }
+            },
+
+            templateMessageWithPhoneOverride: {
+              summary:
+                'Send template using an overridden recipient phone number',
+              value: {
+                to: '+221770000000',
+                templateId: 'ticketnotice',
+                templateData: {
+                  header: [
+                    'ESC-12345'
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    responses: {
+      '200': {
+        description:
+          'Human agent message sent successfully'
+      },
+
+      '400': {
+        description:
+          'Invalid request payload or validation error'
+      },
+
+      '404': {
+        description:
+          'Escalation not found'
+      },
+
+      '409': {
+        description:
+          'Escalation is no longer active'
+      },
+
+      '502': {
+        description:
+          'WhatsApp delivery failed'
+      },
+
+      '500': {
+        description:
+          'Failed to send human agent message'
+      }
+    }
+    }
+    },
+
+  '/admin/escalation/message': {
+    post: {
+      summary: 'Send spontaneous WhatsApp message(s)',
       tags: ['Admin - Escalation'],
       description: `
-      Updates an escalation (ticket) status and optionally sends a notification message.
+      Sends spontaneous WhatsApp messages without requiring an escalation ticket.
 
-      Supports:
-      - Resolve ticket (completed)
-      - Reopen ticket (pending)
-      - Silent update (no message sent)
-      - Notify customer when needed
+      Useful for:
+      - Proactive customer outreach
+      - Human support follow-ups
+      - Operational notifications
+      - Sending approved WhatsApp template messages
+      - Bulk messaging to multiple recipients
 
-      If sendMessage is false, the ticket is updated silently without sending WhatsApp messages.
+      Supported message types:
+      1. Plain Text Message
+        - Provide \`message\`
+        - Leave \`templateId\` empty
+      2. WhatsApp Template Message
+        - Provide \`templateId\`
+        - Provide \`templateData\` if the template contains placeholders
+        - Leave \`message\` empty
+      The same message/template is sent to every recipient in the \`to\` array.
       `,
 
-      parameters: [
-        {
-          name: 'ticketId',
-          in: 'path',
-          required: true,
-          schema: { type: 'string' }
-        }
-      ],
-
       requestBody: {
-        required: false,
+        required: true,
         content: {
           'application/json': {
             schema: {
               type: 'object',
-              required: ['ticketStatus'],
+
+              required: ['to'],
+
               properties: {
-                ticketStatus: {
+                message: {
                   type: 'string',
-                  enum: ['pending', 'completed'],
-                  example: 'completed',
-                  description: 'Status to set for the ticket'
+                  example: 'Hello customer',
+                  description:
+                    'Plain WhatsApp text message. Used only when templateId is not supplied.'
                 },
 
-                sendMessage: {
-                  type: 'boolean',
-                  example: true,
-                  default: false,
+                templateId: {
+                  type: 'string',
+                  example: 'ticketnotice',
                   description:
-                    'If true, sends WhatsApp notification to customer. If false, updates ticket silently.'
+                    'Approved WhatsApp template name.'
+                },
+
+                templateData: {
+                  type: 'object',
+                  description:
+                    'Values used to populate WhatsApp template placeholders.',
+
+                  properties: {
+                    header: {
+                      type: 'array',
+                      items: {
+                        type: 'string'
+                      },
+                      example: ['ESC-12345'],
+                      description:
+                        'Header placeholder values ({{1}}, {{2}}, etc.)'
+                    },
+
+                    body: {
+                      type: 'array',
+                      items: {
+                        type: 'string'
+                      },
+                      example: [
+                        'John Doe',
+                        'ESC-12345',
+                        'Your issue has been resolved'
+                      ],
+                      description:
+                        'Body placeholder values ({{1}}, {{2}}, etc.)'
+                    },
+
+                    buttons: {
+                      type: 'array',
+                      items: {
+                        type: 'string'
+                      },
+                      example: ['ESC-12345'],
+                      description:
+                        'Dynamic URL/button placeholder values'
+                    }
+                  }
                 },
 
                 to: {
-                  type: 'string',
-                  example: '+2348012345678',
-                  description:
-                    'Customer phone number (required only if sendMessage is true)'
-                },
+                  type: 'array',
+                  minItems: 1,
 
-                message: {
-                  type: 'string',
-                  example:
-                    'Your issue has been resolved successfully.',
+                  items: {
+                    type: 'string'
+                  },
+
+                  example: [
+                    '+2348012345678',
+                    '+2348098765432'
+                  ],
+
                   description:
-                    'Message to send to customer (required only if sendMessage is true)'
+                    'List of recipient phone numbers.'
+                }
+              }
+            },
+
+            examples: {
+              textMessage: {
+                summary:
+                  'Send a plain text message to multiple customers',
+                value: {
+                  to: [
+                    '+2348012345678',
+                    '+2348098765432'
+                  ],
+                  message:
+                    'Our support team will contact you shortly.'
+                }
+              },
+
+              templateMessageSingleHeaderVariable: {
+                summary:
+                  'Send template with a single header variable',
+                value: {
+                  to: [
+                    '+2348012345678'
+                  ],
+                  templateId: 'ticketnotice',
+                  templateData: {
+                    header: [
+                      'ESC-12345'
+                    ]
+                  }
+                }
+              },
+
+              templateMessageHeaderAndBodyVariables: {
+                summary:
+                  'Send template with header and body variables',
+                value: {
+                  to: [
+                    '+2348012345678'
+                  ],
+                  templateId: 'ticket_resolved',
+                  templateData: {
+                    header: [
+                      'ESC-12345'
+                    ],
+                    body: [
+                      'John Doe',
+                      'ESC-12345',
+                      'Your issue has been resolved successfully.'
+                    ]
+                  }
+                }
+              },
+
+              templateMessageMultipleBodyVariables: {
+                summary:
+                  'Send template with multiple body placeholders',
+                value: {
+                  to: [
+                    '+2348012345678'
+                  ],
+                  templateId: 'ticket_update',
+                  templateData: {
+                    body: [
+                      'John Doe',
+                      'ESC-12345',
+                      'Resolved',
+                      'REF-001',
+                      'Support Team'
+                    ]
+                  }
+                }
+              },
+
+              templateMessageWithButtonVariables: {
+                summary:
+                  'Send template with dynamic URL/button placeholders',
+                value: {
+                  to: [
+                    '+2348012345678'
+                  ],
+                  templateId: 'ticket_portal_link',
+                  templateData: {
+                    header: [
+                      'ESC-12345'
+                    ],
+                    body: [
+                      'John Doe'
+                    ],
+                    buttons: [
+                      'ESC-12345'
+                    ]
+                  }
                 }
               }
             }
@@ -1307,126 +1988,27 @@ const swaggerDocument = {
 
       responses: {
         '200': {
-          description: 'Escalation status updated successfully'
+          description:
+            'Message sent successfully to at least one recipient'
         },
+
         '400': {
           description:
-            'Invalid request (missing ticketId or invalid ticketStatus)'
+            'Invalid request payload or validation error'
         },
-        '404': {
+
+        '502': {
           description:
-            'Escalation not found or already deleted'
+            'Message delivery failed for all recipients'
         },
+
         '500': {
           description:
-            'Failed to update escalation'
+            'Failed to send spontaneous WhatsApp message'
         }
       }
-    }
-  },
-
-  '/admin/escalation/{ticketId}/message': {
-    post: {
-      summary: 'Send human agent message',
-      tags: ['Admin - Escalation'],
-      description: `
-      Sends a WhatsApp message to the customer for an active escalation.
-
-      Useful for:
-      - Letting a human agent claim and continue a conversation after AI handoff
-      - Replying from a backend or supervisor console using the ticket created during escalation
-
-      The first human message automatically marks the ticket as human-owned,
-      so the bot stops replying only after a human agent has actually engaged.
-      `,
-      parameters: [
-        {
-          name: 'ticketId',
-          in: 'path',
-          required: true,
-          schema: { type: 'string' }
-        }
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              required: ['message'],
-              properties: {
-                message: {
-                  type: 'string',
-                  example: 'Hello, this is Ada from FBNBank support. I am now handling your request.',
-                  description: 'Message that the human agent wants to send to the customer'
-                },
-                to: {
-                  type: 'string',
-                  example: '+221770000000',
-                  description: 'Optional override for the customer phone number; defaults to the number stored on the ticket'
-                }
-              }
-            }
-          }
-        }
+      }
       },
-      responses: {
-        '200': { description: 'Human agent message sent successfully' },
-        '400': { description: 'Invalid request payload' },
-        '404': { description: 'Escalation not found' },
-        '409': { description: 'Escalation is no longer active' },
-        '502': { description: 'WhatsApp delivery failed' },
-        '500': { description: 'Failed to send human agent message' }
-      }
-    }
-  },
-
-  '/admin/escalation/message': {
-    post: {
-      summary: 'Send spontaneous human message(s)',
-      tags: ['Admin - Escalation'],
-      description: `
-      Sends a spontaneous human-originated WhatsApp message without requiring a ticket or thread id.
-
-      Useful for:
-      - Proactive outreach from support operations
-      - Sending one-off updates to multiple customers directly
-
-      This endpoint accepts a list of customer numbers and sends the same message to each number.
-      `,
-      requestBody: {
-        required: true,
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              required: ['message', 'to'],
-              properties: {
-                message: {
-                  type: 'string',
-                  example: 'Hello, this is FBNBank support with an important update.',
-                  description: 'Message content to send to all recipients'
-                },
-                to: {
-                  type: 'array',
-                  minItems: 1,
-                  items: { type: 'string' },
-                  example: ['+221770000000', '+2349013360717'],
-                  description: 'List of customer phone numbers'
-                }
-              }
-            }
-          }
-        }
-      },
-      responses: {
-        '200': { description: 'Message sent to at least one recipient' },
-        '400': { description: 'Invalid request payload' },
-        '502': { description: 'Message delivery failed for all recipients' },
-        '500': { description: 'Failed to send spontaneous human agent message' }
-      }
-    }
-  },
 
   '/admin/escalation/{ticketId}/messages': {
     get: {
@@ -2371,11 +2953,29 @@ app.post('/admin/escalation/:ticketId/message', async (req: Request, res: Respon
     if (!ticketId) {
       return res.status(400).json({ error: 'ticketId is required' });
     }
-
-    const parse = z.object({
-      message: z.string().trim().min(1),
-      to: z.string().trim().optional(),
-    }).safeParse(req.body || {});
+    const parse = z
+      .object({
+        message: z.string().trim().optional(),
+        templateId: z.string().trim().optional(),
+        templateData: z
+          .object({
+            header: z.array(z.string()).optional(),
+            body: z.array(z.string()).optional(),
+            buttons: z.array(z.string()).optional(),
+          })
+          .optional(),
+        to: z.string().trim().optional(),
+      })
+      .refine(
+        (data) =>
+          (data.message && data.message.length > 0) ||
+          !!data.templateId,
+        {
+          message:
+            'Either message or templateId is required',
+        }
+      )
+      .safeParse(req.body || {});
 
     if (!parse.success) {
       return res.status(400).json({ error: 'validation_failed', details: parse.error.format() });
@@ -2390,10 +2990,21 @@ app.post('/admin/escalation/:ticketId/message', async (req: Request, res: Respon
     const result = await escalationService.sendHumanAgentMessage({
       db,
       ticketId,
-      message: parse.data.message,
+      message: parse.data.message || '',
       to: parse.data.to,
-      sendMessage: async (to: string, message: string) => sendWhatsAppMessage({ to, message }),
-    });
+      sendMessage: async (
+        to: string,
+        message: string
+        ) =>
+          sendWhatsAppMessageOrTemplate({
+            to,
+            message: parse.data.templateId
+              ? undefined
+              : message,
+            templateId: parse.data.templateId,
+            templateData: parse.data.templateData,
+          }),
+      });
 
     if (!result.sent) {
       return res.status(502).json({
@@ -2408,7 +3019,11 @@ app.post('/admin/escalation/:ticketId/message', async (req: Request, res: Respon
         db,
         threadId: result.to,
         role: 'Human',
-        messageText: parse.data.message,
+        messageText:
+        parse.data.message ||
+        `[Template:${parse.data.templateId}] ${JSON.stringify(
+          parse.data.templateData || {}
+        )}`,
         escalationId: ticketId,
       });
     } catch (error) {
@@ -2437,12 +3052,33 @@ app.post('/admin/escalation/:ticketId/message', async (req: Request, res: Respon
   }
 });
 
+
 app.post('/admin/escalation/message', async (req: Request, res: Response) => {
-  try {
-    const parse = z.object({
-      message: z.string().trim().min(1),
-      to: z.array(z.string().trim().min(1)).min(1),
-    }).safeParse(req.body || {});
+  try { 
+    const parse = z
+      .object({
+        message: z.string().trim().optional(),
+        templateId: z.string().trim().optional(),
+        templateData: z
+          .object({
+            header: z.array(z.string()).optional(),
+            body: z.array(z.string()).optional(),
+            buttons: z.array(z.string()).optional(),
+          })
+          .optional(),
+        to: z.array(z.string().trim().min(1)).min(1),
+      })
+      .refine(
+        (data) =>
+          (data.message && data.message.length > 0) ||
+          !!data.templateId,
+        {
+          message:
+            'Either message or templateId is required',
+        }
+      )
+      .safeParse(req.body || {});
+
 
     if (!parse.success) {
       return res.status(400).json({ error: 'validation_failed', details: parse.error.format() });
@@ -2461,7 +3097,12 @@ app.post('/admin/escalation/message', async (req: Request, res: Response) => {
 
     const results = await Promise.all(
       recipients.map(async (to) => {
-        const sent = await sendWhatsAppMessage({ to, message: parse.data.message });
+        const sent = await sendWhatsAppMessageOrTemplate({
+          to,
+          message: parse.data.message,
+          templateId: parse.data.templateId,
+          templateData: parse.data.templateData,
+        });
 
         if (sent) {
           try {
@@ -2469,7 +3110,11 @@ app.post('/admin/escalation/message', async (req: Request, res: Response) => {
               db,
               threadId: to,
               role: 'Human',
-              messageText: parse.data.message,
+               messageText:
+                parse.data.message ||
+                `[Template:${parse.data.templateId}] ${JSON.stringify(
+                  parse.data.templateData || {}
+                )}`,
               escalationId: null,
             });
           } catch (error) {
@@ -2500,6 +3145,89 @@ app.post('/admin/escalation/message', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Failed to send spontaneous human agent message', err);
     return res.status(500).json({ error: 'Failed to send spontaneous human agent message' });
+  }
+});
+
+
+// body: { ticketId?: string, ticketStatus?: 'pending'|'completed', to?: string, message?: string }
+app.post('/admin/escalation/:ticketId/status', async (req: Request, res: Response) => {
+  try {
+    const rawTicketId = req.params.ticketId;
+    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
+
+    const {
+      ticketStatus,
+      to,
+      message,
+      templateId,
+      templateData,
+      sendMessage = false,
+    } = req.body || {};
+
+    if (!ticketId) {
+      return res.status(400).json({ error: 'ticketId is required' });
+    }
+
+    if (!ticketStatus || !['pending', 'completed'].includes(ticketStatus)) {
+      return res.status(400).json({
+        error: 'ticketStatus must be pending or completed',
+      });
+    }
+
+    const storage = mastra.getStorage() as any;
+    const db = storage?.db;
+
+    if (!db) {
+      return res.status(500).json({ error: 'DB not initialized' });
+    }
+
+    const result = await escalationService.notifyAndMaybeUpdate({
+      db,
+      ticketId,
+      ticketStatus,
+      to,
+      message,
+
+    sendMessage: sendMessage
+        ? async (
+            t: string,
+            m: string
+          ): Promise<boolean> => {
+            try {
+              return await sendWhatsAppMessageOrTemplate({
+                to: t,
+
+                message: templateId
+                  ? undefined
+                  : m,
+
+                templateId,
+
+                templateData,
+              });
+            } catch (err) {
+              console.error(
+                'Failed to send WhatsApp message:',
+                err
+              );
+
+              return false;
+            }
+          }
+        : undefined
+    })
+
+    return res.status(200).json({
+      success: true,
+      ticketId,
+      status: ticketStatus,
+      messageSent: sendMessage,
+      ...result,
+    });
+
+  } catch (err) {
+    console.error('Failed to update escalation', err);
+    return res.status(500).json({ error: 'Failed to update escalation' });
   }
 });
 
@@ -2543,6 +3271,7 @@ app.post('/admin/escalation/:ticketId/release', async (req: Request, res: Respon
     return res.status(500).json({ error: 'Failed to release human handoff' });
   }
 });
+
 
 app.get('/admin/escalation/:ticketId/messages', async (req: Request, res: Response) => {
   try {
@@ -2594,70 +3323,6 @@ app.get('/admin/escalation/:ticketId/messages', async (req: Request, res: Respon
   }
 });
 
-// body: { ticketId?: string, ticketStatus?: 'pending'|'completed', to?: string, message?: string }
-app.post('/admin/escalation/:ticketId/status', async (req: Request, res: Response) => {
-  try {
-    const rawTicketId = req.params.ticketId;
-    const ticketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
-
-    const {
-      ticketStatus,
-      to,
-      message,
-      sendMessage = false, //  NEW FLAG
-    } = req.body || {};
-
-    if (!ticketId) {
-      return res.status(400).json({ error: 'ticketId is required' });
-    }
-
-    if (!ticketStatus || !['pending', 'completed'].includes(ticketStatus)) {
-      return res.status(400).json({
-        error: 'ticketStatus must be pending or completed',
-      });
-    }
-
-    const storage = mastra.getStorage() as any;
-    const db = storage?.db;
-
-    if (!db) {
-      return res.status(500).json({ error: 'DB not initialized' });
-    }
-
-    const result = await escalationService.notifyAndMaybeUpdate({
-      db,
-      ticketId,
-      ticketStatus,
-      to,
-      message,
-
-      //  ONLY SEND IF TRUE
-      sendMessage: sendMessage
-      ? async (t: string, m: string): Promise<boolean> => {
-          try {
-            await sendWhatsAppMessage({ to: t, message: m });
-            return true;
-          } catch (err) {
-            console.error('Failed to send WhatsApp message:', err);
-            return false;
-          }
-        }
-      : undefined
-    });
-
-    return res.status(200).json({
-      success: true,
-      ticketId,
-      status: ticketStatus,
-      messageSent: sendMessage,
-      ...result,
-    });
-
-  } catch (err) {
-    console.error('Failed to update escalation', err);
-    return res.status(500).json({ error: 'Failed to update escalation' });
-  }
-});
 
 // delete /admin/escalation/:ticketId - could be added to remove escalations if needed, but not implemented here for safety
 app.delete('/admin/escalation/:ticketId', async (req, res) => {
