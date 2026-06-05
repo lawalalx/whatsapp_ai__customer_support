@@ -278,7 +278,7 @@ const swaggerDocument = {
                 topic: { type: 'string' },
                 mode: {
                   type: 'string',
-                  enum: ['ai', 'manual', 'meta'],
+                  enum: ['ai', 'manual'],
                   description: '**ai** — AI-generated questions | **manual** — predefined template | **meta** — approved WhatsApp template'
                 },
                 context: { type: 'string', description: 'Optional AI context for personalization' },
@@ -297,10 +297,6 @@ const swaggerDocument = {
               manual_mode: {
                 summary: 'Manual mode — predefined template',
                 value: { to: '2348123456789', surveyId: 'nps-template-001', topic: 'NPS Survey', mode: 'manual', surveyIntroTemplateId: 'survey_intro_v1' }
-              },
-              meta_mode: {
-                summary: 'Meta mode — approved WhatsApp template',
-                value: { to: '2348123456789', surveyId: 'meta-onboarding', topic: 'Onboarding Feedback', mode: 'meta' }
               }
             }
           }
@@ -362,7 +358,7 @@ const swaggerDocument = {
               },
               mode: { 
                 type: 'string', 
-                enum: ['ai', 'manual', 'meta'],
+                enum: ['ai', 'manual'],
                 description: '**ai** — AI-generated questions | **manual** — predefined template | **meta** — approved WhatsApp template'
               },
               context: { 
@@ -400,15 +396,6 @@ const swaggerDocument = {
                 customers: ['2348123456789', '2348012345678']
               }
             },
-            bulk_meta_mode: {
-              summary: 'Bulk — Meta mode',
-              value: {
-                surveyId: 'meta-onboarding',
-                topic: 'Onboarding Feedback',
-                mode: 'meta',
-                customers: ['2348123456789', '2348012345678']
-              }
-            }
           }
         }
       }
