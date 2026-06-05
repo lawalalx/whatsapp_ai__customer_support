@@ -24,14 +24,26 @@ export async function sendSurveyIntro({
       to,
       templateId: proactiveTemplate,
       phoneNumberId,
-      templateData: {
-        body: [
-          `${introText}\n\nReply "Proceed" to start.`,
-        ],
-      },
+      templateData: {},
     });
     if (templateSent) {
-      return true;
+      console.log(
+        'Template sent successfully. Sending Proceed button...'
+      );
+
+      return sendWhatsAppSurvey({
+        to,
+        question: "Please click Proceed to start the survey ot type 'end' to stop.",
+        options: [
+          {
+            id: 'survey_intro_proceed',
+            title: 'Proceed',
+          },
+        ],
+        headerText: '',
+        footerText: '',
+        phoneNumberId,
+      });
     }
 
     console.warn('Proactive intro template send failed; falling back to interactive Proceed intro card.');
@@ -46,6 +58,9 @@ export async function sendSurveyIntro({
     phoneNumberId,
   });
 }
+
+
+
 
 export async function sendSurveyQuestion({
   to,
@@ -67,35 +82,8 @@ export async function sendSurveyQuestion({
   let qText = question.text ?? question.question;
   if (!qText) return false;
 
-  const headerText = index === 0 ? "FBNBank Survey" : undefined;
+  const headerText = index === 0 ? "" : undefined;
 
-  // If this is the first question of a proactively-started session, use
-  // a pre-approved WhatsApp template to avoid the 24-hour re-engagement block.
-  const proactiveTemplate = process.env.WHATSAPP_PROACTIVE_TEMPLATE;
-  const templateLang = process.env.WHATSAPP_TEMPLATE_LANG || 'en_US';
-  
-  if ((session?.current_question === 0 || session?.current_question === undefined) && proactiveTemplate) {
-    console.log('Using proactive template for first question:', proactiveTemplate);
-
-    const templateSent = await sendWhatsAppTemplate({
-      to,
-      templateId: proactiveTemplate,
-      phoneNumberId,
-      templateData: {
-        body: [
-          `${qText}\n\n${footerText}`,
-        ],
-      },
-    });
-
-    if (templateSent) {
-      return true;
-    }
-
-    console.warn('First-question template send failed; falling back to standard survey question delivery.');
-  }
-
-  // Prefer interactive when options are present.
   const opts = question.options ?? [];
   const hasOptions = Array.isArray(opts) && opts.length > 0;
 

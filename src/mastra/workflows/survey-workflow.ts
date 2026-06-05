@@ -78,7 +78,7 @@ const generateSurveyContent = createStep({
       if (manualQuestions) {
         return { questions: manualQuestions }
       } else {
-        throw new Error('Manual mode: survey template not found')
+        console.error('Manual mode: survey template not found')
       }
     }
 

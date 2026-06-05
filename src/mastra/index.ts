@@ -76,13 +76,6 @@ const routes = [
       }
 
       try {
-        if (mode === 'meta') {
-          // Send Meta WhatsApp survey template (no workflow)
-          // Use sendMetaTemplate helper
-          const { sendMetaTemplate } = await import("./sendMetaTemplate.js");
-          const metaResult = await sendMetaTemplate({ to, surveyId, topic });
-          return c.json({ success: true, mode: 'meta', metaResult });
-        }
 
         // For ai/manual, run the workflow
         const workflow = c.get("mastra").getWorkflow("surveyWorkflow");
@@ -134,12 +127,7 @@ const routes = [
           try {
             // Respect meta mode: send template directly
             const mode = customerMode || body.mode;
-            if (mode === 'meta') {
-              const { sendMetaTemplate } = await import("./sendMetaTemplate.js");
-              const metaResult = await sendMetaTemplate({ to, surveyId: body.surveyId, topic: body.topic });
-              return { to, success: true, mode: 'meta', metaResult };
-            }
-
+            
             // For ai/manual, start a workflow run
             const run = await workflow.createRun();
             const inputData: any = { to, surveyId: body.surveyId, topic: body.topic };
