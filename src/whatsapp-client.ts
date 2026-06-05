@@ -510,42 +510,6 @@ export interface TemplateComponent {
 
 
 
-// export interface SendTemplateParams {
-//   to: string;
-//   templateName: string;
-//   languageCode: string;
-//   components?: TemplateComponent[];
-//   phoneNumberId?: string;
-// }
-
-// export async function sendWhatsAppTemplate({
-//   to,
-//   templateName,
-//   languageCode,
-//   components,
-//   phoneNumberId,
-// }: SendTemplateParams): Promise<boolean> {
-//   const template: Record<string, unknown> = {
-//     name: templateName,
-//     language: { code: languageCode },
-//   };
-//   if (components && components.length > 0) {
-//     template.components = components;
-//   }
-
-//   const { ok } = await post({
-//     messaging_product: 'whatsapp',
-//     recipient_type: 'individual',
-//     to,
-//     type: 'template',
-//     template,
-//   }, { phoneNumberId });
-//   if (ok) console.log(`✅ Template "${templateName}" sent to ${to}`);
-//   return ok;
-// }
-
-
-
 
 // ─── 5. Mark message as read ─────────────────────────────────────────────────
 

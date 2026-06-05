@@ -23,17 +23,14 @@ export async function sendSurveyIntro({
     console.log('Attempting proactive template for survey intro:', proactiveTemplate);
     const templateSent = await sendWhatsAppTemplate({
       to,
-      templateName: proactiveTemplate,
-      languageCode: templateLang,
+      templateId: proactiveTemplate,
       phoneNumberId,
-      components: [
-        {
-          type: 'body',
-          parameters: [{ type: 'text', text: `${introText}\n\nReply "Proceed" to start.` }],
-        },
-      ],
+      templateData: {
+        body: [
+          `${introText}\n\nReply "Proceed" to start.`,
+        ],
+      },
     });
-
     if (templateSent) {
       return true;
     }
@@ -83,15 +80,13 @@ export async function sendSurveyQuestion({
 
     const templateSent = await sendWhatsAppTemplate({
       to,
-      templateName: proactiveTemplate,
-      languageCode: templateLang,
+      templateId: proactiveTemplate,
       phoneNumberId,
-      components: [
-        {
-          type: 'body',
-          parameters: [{ type: 'text', text: `${qText}\n\n${footerText}` }],
-        },
-      ],
+      templateData: {
+        body: [
+          `${qText}\n\n${footerText}`,
+        ],
+      },
     });
 
     if (templateSent) {
