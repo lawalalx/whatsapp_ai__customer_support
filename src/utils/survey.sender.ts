@@ -17,7 +17,6 @@ export async function sendSurveyIntro({
   setLastOutbound(to, 'survey_question');
 
   const proactiveTemplate = surveyIntroTemplateId || process.env.WHATSAPP_PROACTIVE_TEMPLATE;
-  const templateLang = process.env.WHATSAPP_TEMPLATE_LANG || 'en_US';
 
   if (proactiveTemplate) {
     console.log('Attempting proactive template for survey intro:', proactiveTemplate);
