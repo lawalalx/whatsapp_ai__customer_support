@@ -257,7 +257,6 @@ const swaggerDocument = {
       |------|-------------|
       | \`ai\` | AI-generated questions dynamically created at runtime based on the topic and context |
       | \`manual\` | Uses predefined survey templates stored in the system |
-      | \`meta\` | Uses approved WhatsApp Business message templates (outside the 24-hour window) |
 
       The workflow manages:
       - Question sequencing
@@ -327,7 +326,6 @@ const swaggerDocument = {
     |------|-------------|
     | \`ai\` | AI-generated questions dynamically created at runtime based on the topic and context |
     | \`manual\` | Uses predefined survey templates stored in the system |
-    | \`meta\` | Uses approved WhatsApp Business message templates (outside the 24-hour window) |
 
     Top-level fields (\`surveyId\`, \`topic\`, \`mode\`, \`context\`) are applied globally 
     to all recipients.
