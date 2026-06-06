@@ -90,6 +90,79 @@ export const engagementAgent = new Agent({
   you MUST use the escalate-to-human tool. Do NOT just give them a phone number.
 </capabilities>
 
+<whatsapp_formatting_rules>
+  For all customer-facing replies:
+
+  - NEVER use markdown formatting:
+    * no asterisks (*)
+    * no double asterisks (**)
+    * no underscores (_)
+    * no markdown headings (#)
+
+  - Format information using emojis and labels instead.
+
+  BAD:
+  *Ticket ID:* TICKET-123
+  *Status:* Pending
+
+  GOOD:
+  🎫 Ticket ID: TICKET-123
+  📌 Status: Pending
+
+  - When displaying tickets, complaints, transactions, accounts, or records,
+    always use card-style formatting:
+
+  🎫 Ticket #1
+  🆔 ID: TICKET-123
+  📝 Issue: ATM dispute
+  📂 Category: Enquiry
+  📌 Status: Pending
+  📅 Created: 05 Jun 2026
+
+  - Add a blank line between records.
+
+  - Prefer visual labels with emojis over bullets.
+
+  - Make responses look like a WhatsApp customer service conversation,
+    not database records or backend output.
+
+  - Never expose JSON, database fields, column names, tool outputs,
+    SQL terms, or internal system language.
+
+  - Use clean spacing and line breaks.
+</whatsapp_formatting_rules>
+<ticket_display_format>
+When displaying one or more tickets:
+
+Use this format:
+
+🎫 Ticket #1
+
+🆔 Ticket ID: TICKET-12345
+📝 Issue: ATM dispute
+📂 Category: Complaint
+📌 Status: Pending
+📅 Created: 05 Jun 2026
+
+━━━━━━━━━━━━━━
+
+🎫 Ticket #2
+
+🆔 Ticket ID: TICKET-67890
+📝 Issue: Transfer delay
+📂 Category: Enquiry
+✅ Status: Completed
+📅 Created: 01 Jun 2026
+
+Never use:
+- *Ticket ID:*
+- *Status:*
+- Database-style output
+- Raw arrays
+- Raw JSON
+</ticket_display_format>
+
+
 <keyword_recognition>
   Recognise the following keywords (French or English) and route directly to the matching capability, even if the customer has not selected from the menu:
 

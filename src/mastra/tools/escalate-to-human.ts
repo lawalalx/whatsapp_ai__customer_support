@@ -16,6 +16,7 @@ export const escalateTool = createTool({
   inputSchema: z.object({
     message: z.string(),
     category: z.enum(['complaint', 'enquiry', 'request']),
+    // handoff_phone: z.string(),
     customerPhone: z.string(),
   }),
 
@@ -27,8 +28,12 @@ export const escalateTool = createTool({
   execute: async (input, context) => {
 
     const ticketId = generateTicketId()
-    console.log('\n\nEscalating to human agent with message:', input.message)
-    const params = [input.message, input.category, 'pending', ticketId, input.customerPhone]
+
+    const handoffPhone =
+    context?.agent?.threadId?.replace('thread_', '') ||
+    input.customerPhone;
+
+    const params = [input.message, input.category, 'pending', ticketId, input.customerPhone, handoffPhone]
 
     // Determine DB client: prefer Mastra storage db when available
     const mastraInstance = (context as any)?.mastra ?? (context as any)?.agent?.mastra ?? undefined;
@@ -38,7 +43,7 @@ export const escalateTool = createTool({
     if (storageDb && typeof storageDb.any === 'function') {
       try {
         await storageDb.any(
-          'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone) VALUES ($1, $2, $3, $4, $5)',
+          'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, handoff_phone) VALUES ($1, $2, $3, $4, $5, $6)',
           params
         )
         console.log('Ticket created successfully (via Mastra storage)')
@@ -59,7 +64,7 @@ export const escalateTool = createTool({
     try {
       client = await pool.connect()
       await client.query(
-        'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone) VALUES ($1, $2, $3, $4, $5)',
+        'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, handoff_phone) VALUES ($1, $2, $3, $4, $5, $6)',
         params
       )
       console.log('Ticket created successfully (via local pool)')
@@ -124,7 +129,7 @@ export const deleteEscalationTool = createTool({
           return {
             success: false,
             ticketStatus: ticket.ticket_status,
-            message: 'This ticket is already archived and cannot be deleted.',
+            message: 'This ticket is already resolved and cannot be deleted.',
           }
         }
 
@@ -142,7 +147,9 @@ export const deleteEscalationTool = createTool({
           [ticketId]
         );
 
-        if (result.length > 0) {
+        console.log('\n\nMastra DB update result:', result)
+
+        if ((result.rowCount ?? 0) > 0) {
           console.log('Ticket deleted successfully (via Mastra storage)')
           return { success: true, message: 'Ticket deleted successfully.' }
         } else {
@@ -166,7 +173,7 @@ export const deleteEscalationTool = createTool({
         'SELECT ticket_status FROM escalations WHERE ticket_id = $1',
         [ticketId]
       )
-
+      
       const ticket = (existing.rowCount ?? 0) > 0 ? existing.rows[0] : null
       if (!ticket) {
         console.warn('No ticket found to delete (via local pool)')
@@ -257,6 +264,10 @@ export const getEscalatedTicketsByCustomerPhoneTool = createTool({
         AND ticket_status != 'completed'
       ORDER BY created_at DESC
     `;
+
+
+    console.log('\n\ngetEscalatedTicketsByCustomerPhoneTool initialized with input schema:')
+
 
     const mastraInstance =
       (context as any)?.mastra ??
