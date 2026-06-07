@@ -76,7 +76,7 @@ const PORT =
 
 
 const URL =
-  process.env.REMOTE_URL?.replace(/\/$/, '') ||
+  process.env.LOCAL_URL?.replace(/\/$/, '') ||
   process.env.SERVER_URL?.replace(/\/$/, '');
 
 app.use(express.json());
@@ -608,8 +608,8 @@ const swaggerDocument = {
                   properties: {
                     to: {
                       oneOf: [
-                        { type: 'string', example: '2349013360717' },
-                        { type: 'array', items: { type: 'string' }, example: ['2349013360717', '2348012345678'], minItems: 1 }
+                        { type: 'string', example: '234901234567' },
+                        { type: 'array', items: { type: 'string' }, example: ['234901234567', '2348012345678'], minItems: 1 }
                       ],
                       description: 'Recipient phone or list of recipient phones in E.164 without +.'
                     },
@@ -626,7 +626,7 @@ const swaggerDocument = {
                   single: {
                     summary: 'Single recipient',
                     value: {
-                      to: '2349013360717',
+                      to: '234901234567',
                       flowId: '1234567890',
                       flowToken: 'first-survey',
                       cta: 'Take Survey',
@@ -4121,6 +4121,11 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
 
     console.log('🎯 ACTION:', payload.action);
 
+    console.log(
+      'FULL FLOW PAYLOAD:',
+      JSON.stringify(payload, null, 2)
+    );
+
     const flippedIv = Buffer.from(iv.map((byte) => ~byte));
 
     const encryptResponse = (
@@ -4206,6 +4211,8 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
                 surveyId = localFlow?.survey_id || undefined;
               } catch {}
             }
+            
+
 
             // 4. Pass the phone number to the save function
             await metaSurveyService.saveMetaFlowResponse(db, {
