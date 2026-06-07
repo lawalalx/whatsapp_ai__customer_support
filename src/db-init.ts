@@ -40,18 +40,19 @@ export const initDatabase = async () => {
 
     // --- ADD THIS BLOCK HERE ---
     console.log('🧹 Cleaning up old data and migration history...');
-    // await client.query(`
-    //   -- Drop tables in order of dependency
-    //   DROP TABLE IF EXISTS schema_migrations CASCADE; 
-    //   DROP TABLE IF EXISTS survey_responses CASCADE;
-    //   DROP TABLE IF EXISTS survey_sessions CASCADE;
-    //   DROP TABLE IF EXISTS surveys CASCADE;
-    //   DROP TABLE IF EXISTS meta_flow_responses CASCADE;
-    //   DROP TABLE IF EXISTS meta_flow_surveys CASCADE;
-    //   DROP TABLE IF EXISTS chat_history CASCADE;
-    //   DROP TABLE IF EXISTS escalation_messages CASCADE;
-    //   DROP TABLE IF EXISTS escalations CASCADE;
-    // `);
+    
+    await client.query(`
+      -- Drop tables in order of dependency
+      DROP TABLE IF EXISTS schema_migrations CASCADE; 
+      DROP TABLE IF EXISTS survey_responses CASCADE;
+      DROP TABLE IF EXISTS survey_sessions CASCADE;
+      DROP TABLE IF EXISTS surveys CASCADE;
+      DROP TABLE IF EXISTS meta_flow_responses CASCADE;
+      DROP TABLE IF EXISTS meta_flow_surveys CASCADE;
+      DROP TABLE IF EXISTS chat_history CASCADE;
+      DROP TABLE IF EXISTS escalation_messages CASCADE;
+      DROP TABLE IF EXISTS escalations CASCADE;
+    `);
 
     console.log('📦 Initializing database...');
 
@@ -388,7 +389,7 @@ export const initDatabase = async () => {
           CREATE TABLE IF NOT EXISTS meta_flow_responses (
             id              TEXT PRIMARY KEY,
             flow_id         TEXT NOT NULL,
-            flow_token      TEXT UNIQUE NOT NULL,
+            flow_token      TEXT NOT NULL,
             customer_phone  TEXT,
             survey_id       TEXT,
             responses       JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -405,6 +406,9 @@ export const initDatabase = async () => {
 
           CREATE INDEX IF NOT EXISTS idx_meta_flow_responses_created
           ON meta_flow_responses (created_at DESC);
+
+          CREATE INDEX IF NOT EXISTS idx_meta_flow_responses_flow_token
+          ON meta_flow_responses (flow_token);
         `
       );
 

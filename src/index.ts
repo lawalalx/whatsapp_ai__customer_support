@@ -76,7 +76,7 @@ const PORT =
 
 
 const URL =
-  process.env.LOCAL_URL?.replace(/\/$/, '') ||
+  process.env.REMOTE_URL?.replace(/\/$/, '') ||
   process.env.SERVER_URL?.replace(/\/$/, '');
 
 app.use(express.json());
@@ -3700,15 +3700,17 @@ app.get('/admin/meta-survey', async (req: Request, res: Response) => {
 });
 
 
-
 app.get('/admin/meta-survey/responses', async (req: Request, res: Response) => {
   try {
     const storage = mastra.getStorage() as any;
     const db = storage?.db;
     if (!db) return res.status(500).json({ error: 'DB not initialized' });
 
-    // 1. Pagination & Filters
-    const { flowId, customerPhone, surveyId, source, from, to } = req.query as Record<string, string>;
+    const query = req.query as Record<string, string>;
+
+    const { flowId, customerPhone, surveyId, from, to } = query;
+    const source = query.source || 'data_exchange';
+    
     const limit = req.query.limit ? Math.min(Number.parseInt(req.query.limit as string, 10), 500) : 50;
     const offset = req.query.offset ? Number.parseInt(req.query.offset as string, 10) : 0;
 
@@ -3725,10 +3727,21 @@ app.get('/admin/meta-survey/responses', async (req: Request, res: Response) => {
     const finalResponses = await Promise.all(rawResponses.map(async (row: any) => {
       const fId = row.flow_id;
 
-      // Fill cache if empty for this Flow ID
+      console.log(`Processing response for flowId: ${row}`);
       if (fId && !surveyCache[fId]) {
         try {
           const surveyDef = await metaSurveyService.getMetaFlowSurveyByFlowId(db, fId);
+
+          console.log(
+            'questions_data:',
+            surveyDef?.questions_data
+          );
+
+          console.log(
+            'questions_data type:',
+            typeof surveyDef?.questions_data
+          );
+
           surveyCache[fId] = surveyDef?.questions_data || [];
         } catch {
           surveyCache[fId] = [];
@@ -3737,14 +3750,22 @@ app.get('/admin/meta-survey/responses', async (req: Request, res: Response) => {
 
       const questions = surveyCache[fId] || [];
 
-      // Generate the human-readable array
+       if (
+        questions.length > 0 &&
+        questions[0]?.id === 'QUESTIONS'
+      ) {
+        console.warn(
+          `Flow ${fId} contains Flow JSON instead of survey questions`
+        );
+      }
+
       const mappedData = metaSurveyService.mapResponsesToQuestions(row.responses || {}, questions);
 
-      // Extract original fields EXCEPT 'responses'
-      const { responses: _oldResponses, ...otherData } = row;
+      // FIX 2: Destructure 'id' out of the row object to rename it explicitly
+      const { id, responses: _oldResponses, ...otherData } = row;
 
-      // Re-assemble with 'responses' as the new array
       return {
+        submission_id: id,
         ...otherData,
         responses: mappedData
       };
@@ -3766,7 +3787,6 @@ app.get('/admin/meta-survey/responses', async (req: Request, res: Response) => {
 });
 
 
-
 app.get('/admin/meta-survey/:flowId', async (req: Request, res: Response) => {
   const { flowId } = req.params;
   try {
@@ -3783,7 +3803,6 @@ app.get('/admin/meta-survey/:flowId', async (req: Request, res: Response) => {
     return res.status(500).json({ error: e.message || 'Failed to get meta survey' });
   }
 });
-
 
 app.post('/admin/meta-survey/:flowId/publish', async (req: Request, res: Response) => {
   const { flowId } = req.params;
@@ -3833,7 +3852,6 @@ app.post('/admin/meta-survey/:flowId/publish', async (req: Request, res: Respons
     return res.status(500).json({ error: e.message || 'Publish failed' });
   }
 });
-
 
 app.post('/admin/meta-survey/:flowId/deprecate', async (req: Request, res: Response) => {
   const { flowId } = req.params;
@@ -3936,6 +3954,7 @@ app.delete('/admin/meta-survey/:flowId/delete-with-responses/purge', async (req:
     return res.status(500).json({ error: e.message || 'Delete flow and responses failed' });
   }
 });
+
 
 app.post('/admin/meta-survey/send', async (req: Request, res: Response) => {
   try {
@@ -4099,7 +4118,7 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
     );
 
     // ─────────────────────────────────────────────
-    // 2️⃣ DECRYPT REQUEST PAYLOAD (AES-128-GCM)
+    // DECRYPT REQUEST PAYLOAD (AES-128-GCM)
     // ─────────────────────────────────────────────
     const iv = Buffer.from(initial_vector, 'base64');
     const encryptedBuffer = Buffer.from(encrypted_flow_data, 'base64');
@@ -4218,11 +4237,27 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
             await metaSurveyService.saveMetaFlowResponse(db, {
               flowId: String(flowId),
               flowToken: String(flowToken),
-              customerPhone: customerPhone, // ✅ THIS WAS MISSING
+              customerPhone: customerPhone,
               surveyId,
               responses: responseData,
               source: 'data_exchange',
             });
+
+            const verify = await db.query(
+              `
+              SELECT *
+              FROM meta_flow_responses
+              WHERE flow_token = $1
+              ORDER BY created_at DESC
+              LIMIT 1
+              `,
+              [flowToken]
+            );
+
+            console.log(
+              "VERIFY SAVED:",
+              JSON.stringify(verify.rows, null, 2)
+            );
             
             console.log(`✅ Saved response for phone: ${customerPhone}`);
           }
@@ -4230,6 +4265,17 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
       } catch (saveErr) {
         console.error('❌ Failed to save data_exchange response', saveErr);
       }
+    }
+
+
+
+    if (payload.action !== 'data_exchange') {
+      console.log('Ignoring non-data_exchange payload:', payload.action);
+      return res.status(200).send(encryptResponse({
+        version: payload.version || '3.0',
+        screen: 'COMPLETE',
+        data: {}
+      }));
     }
 
 
@@ -4251,6 +4297,7 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 
 

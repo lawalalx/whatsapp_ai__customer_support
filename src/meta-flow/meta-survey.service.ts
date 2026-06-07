@@ -73,6 +73,13 @@ export async function upsertMetaFlowSurvey(
       data_endpoint_url = EXCLUDED.data_endpoint_url,
       updated_at       = NOW()
   `;
+
+
+  console.log(
+    'Saving questionsData:',
+    JSON.stringify(questionsData, null, 2)
+  );
+
   const values = [
     randomUUID(),
     flowId,
@@ -251,6 +258,13 @@ export async function getMetaFlowSurveyByFlowId(
   const sql = `SELECT * FROM meta_flow_surveys WHERE flow_id = $1 LIMIT 1`;
   if (typeof db.oneOrNone === 'function') return db.oneOrNone(sql, [flowId]);
   const result = await db.query(sql, [flowId]);
+
+  console.log(
+    'FLOW LOOKUP:',
+    flowId,
+    JSON.stringify(result.rows[0], null, 2)
+  );
+
   return result.rows[0] ?? null;
 }
 
@@ -385,7 +399,6 @@ export async function deleteMetaFlowResponsesByFlowId(db: any, flowId: string): 
 
 // ─── Response CRUD ────────────────────────────────────────────────────────────
 
-/** Save a response received from the data endpoint or nfm_reply webhook */
 export async function saveMetaFlowResponse(
   db: any,
   params: {
@@ -397,17 +410,22 @@ export async function saveMetaFlowResponse(
     source?: 'data_exchange' | 'nfm_reply';
   },
 ): Promise<void> {
-  const { flowId, flowToken, customerPhone, surveyId, responses, source = 'data_exchange' } = params;
+  const {
+    flowId,
+    flowToken,
+    customerPhone,
+    surveyId,
+    responses,
+    source = 'data_exchange',
+  } = params;
 
   const sql = `
     INSERT INTO meta_flow_responses
       (id, flow_id, flow_token, customer_phone, survey_id, responses, source, created_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-    ON CONFLICT (flow_token) DO UPDATE SET
-      responses      = EXCLUDED.responses,
-      customer_phone = COALESCE(EXCLUDED.customer_phone, meta_flow_responses.customer_phone),
-      source         = EXCLUDED.source
+    VALUES
+      ($1, $2, $3, $4, $5, $6, $7, NOW())
   `;
+
   const values = [
     randomUUID(),
     flowId,
@@ -424,6 +442,7 @@ export async function saveMetaFlowResponse(
     await db.query(sql, values);
   }
 }
+
 
 /** Query meta flow responses with optional filters */
 export async function queryMetaFlowResponses(
@@ -516,14 +535,14 @@ export async function countMetaFlowResponses(
   return Number(result.rows[0]?.total ?? 0);
 }
 
-
-
 export function mapResponsesToQuestions(responses: Record<string, any>, questionsData: any[]) {
   return Object.entries(responses).map(([key, value]) => {
     // 1. Look for the question in your questions_data array
     // Your FlowQuestion uses 'id' and 'text'
     const question = questionsData.find(q => q.id === key || q.name === key);
     
+
+    console.log(`\n\nMapping response key: ${key} to question: ${question ? question.text || question.label || question.title : 'Unknown Question'}`);  
     return {
       field_id: key,
       // Check .text (from your interface) first, then .label/.title as fallbacks
