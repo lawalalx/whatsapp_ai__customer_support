@@ -158,14 +158,14 @@ function buildQuestionComponent(q: MetaFlowQuestion): any[] {
  */
 
 
-interface FlowQuestion {
-  id: string;
-  text: string;
-  type: 'list' | 'button' | 'text' | 'textarea' | 'date';
-  options?: string[];
-  required?: boolean;
-  placeholder?: string;
-}
+// interface FlowQuestion {
+//   id: string;
+//   text: string;
+//   type: 'list' | 'button' | 'text' | 'textarea' | 'date';
+//   options?: string[];
+//   required?: boolean;
+//   placeholder?: string;
+// }
 
 interface FlowParams {
   id?: string;
@@ -176,81 +176,269 @@ interface FlowParams {
 }
 
 
+// export function buildSurveyFlowJson(params: FlowParams, endpointUrl: string): any {
+//   const { name, description, questions, thankYouText } = params;
+
+//   // 1. Map questions to WhatsApp Flow components
+//   const questionComponents = questions.map((q) => {
+//     switch (q.type) {
+//       case 'list':
+//         return {
+//           type: 'Dropdown',
+//           label: q.text,
+//           name: q.id,
+//           required: q.required !== false,
+//           'data-source': (q.options || []).map((opt) => ({
+//             id: opt,
+//             title: opt,
+//           })),
+//         };
+//       case 'button':
+//         return {
+//           type: 'RadioButtonsGroup',
+//           label: q.text,
+//           name: q.id,
+//           required: q.required !== false,
+//           'data-source': (q.options || []).map((opt) => ({
+//             id: opt,
+//             title: opt,
+//           })),
+//         };
+//       case 'text':
+//         return {
+//           type: 'TextInput',
+//           label: q.text,
+//           name: q.id,
+//           required: q.required !== false,
+//           placeholder: q.placeholder,
+//         };
+//       case 'textarea':
+//         return {
+//           type: 'TextArea',
+//           label: q.text,
+//           name: q.id,
+//           required: q.required !== false,
+//           // placeholder: q.placeholder,
+//         };
+//       case 'date':
+//         return {
+//           type: 'DatePicker',
+//           label: q.text,
+//           name: q.id,
+//           required: q.required !== false,
+//         };
+//       default:
+//         return {
+//           type: 'TextBody',
+//           text: q.text,
+//         };
+//     }
+//   });
+
+//   // 2. Build the Flow JSON structure
+//   return {
+//     version: '7.0',
+    
+//     // REQUIRED for data_exchange flows
+//     data_api_version: '3.0',
+
+//     // data_channel_uri: endpointUrl,
+
+//     // REQUIRED for navigation between screens
+//     routing_model: {
+//       INTRO: ['QUESTIONS'],
+//       QUESTIONS: ['COMPLETE'],
+//       COMPLETE: [],
+//     },
+
+//     screens: [
+//       {
+//         id: 'INTRO',
+//         title: name,
+//         layout: {
+//           type: 'SingleColumnLayout',
+//           children: [
+//             { type: 'TextHeading', text: name },
+//             { type: 'TextBody', text: description || 'Please complete this survey.' },
+//             {
+//               type: 'Footer',
+//               label: 'Start Survey',
+//               'on-click-action': {
+//                 name: 'navigate',
+//                 next: { type: 'screen', name: 'QUESTIONS' },
+//               },
+//             },
+//           ],
+//         },
+//       },
+//       {
+//         id: 'QUESTIONS',
+//         title: 'Questions',
+//         terminal: false,
+//         layout: {
+//           type: 'SingleColumnLayout',
+//           children: [
+//             ...questionComponents,
+//             {
+//               type: 'Footer',
+//               label: 'Submit',
+//               'on-click-action': {
+//                 name: 'data_exchange',
+//                 payload: questions.reduce((acc, q) => {
+//                   acc[q.id] = `\${form.${q.id}}`;
+//                   return acc;
+//                 }, {} as any),
+//               },
+//             },
+//           ],
+//         },
+//       },
+//       {
+//         id: 'COMPLETE',
+//         title: 'Done',
+//         terminal: true,
+//         layout: {
+//           type: 'SingleColumnLayout',
+//           children: [
+//             { type: 'TextHeading', text: 'Thank You!' },
+//             { type: 'TextBody', text: thankYouText || 'Your feedback has been received.' },
+//             {
+//               type: 'Footer',
+//               label: 'Close',
+//               'on-click-action': {
+//                 name: 'complete',
+//                 payload: {},
+//               },
+//             },
+//           ],
+//         },
+//       },
+//     ],
+//   };
+// }
+
+
+
+
+
+export interface FlowCondition {
+  dependsOn: string; // The ID of the previous question
+  equals: string;    // The value that triggers this question to show
+}
+
+export interface MetaFlowQuestion {
+  id: string;
+  text: string;
+  type: QuestionType;
+  options?: string[];
+  required?: boolean;
+  placeholder?: string;
+  sectionTitle?: string;
+  showIf?: FlowCondition; // <-- ADD THIS
+}
+
+interface FlowQuestion {
+  id: string;
+  text: string;
+  type: 'list' | 'button' | 'text' | 'textarea' | 'date';
+  options?: string[];
+  required?: boolean;
+  placeholder?: string;
+  showIf?: FlowCondition; // <-- ADD THIS
+}
+
+
+
 export function buildSurveyFlowJson(params: FlowParams, endpointUrl: string): any {
   const { name, description, questions, thankYouText } = params;
 
+  // --- NEW: Helper to ensure Meta IDs don't contain spaces ---
+  const sanitizeId = (str: string) => str.replace(/[^a-zA-Z0-9_]/g, '_');
+
   // 1. Map questions to WhatsApp Flow components
   const questionComponents = questions.map((q) => {
+    let component: any;
+
     switch (q.type) {
       case 'list':
-        return {
+        component = {
           type: 'Dropdown',
           label: q.text,
           name: q.id,
           required: q.required !== false,
           'data-source': (q.options || []).map((opt) => ({
-            id: opt,
-            title: opt,
+            id: sanitizeId(opt), // Sanitize ID here
+            title: opt,          // Keep the display title pretty
           })),
         };
+        break;
       case 'button':
-        return {
+        component = {
           type: 'RadioButtonsGroup',
           label: q.text,
           name: q.id,
           required: q.required !== false,
           'data-source': (q.options || []).map((opt) => ({
-            id: opt,
-            title: opt,
+            id: sanitizeId(opt), // Sanitize ID here
+            title: opt,          // Keep the display title pretty
           })),
         };
+        break;
       case 'text':
-        return {
+        component = {
           type: 'TextInput',
           label: q.text,
           name: q.id,
           required: q.required !== false,
+          'input-type': 'text', // Explicitly defining this as Meta sometimes demands it
           placeholder: q.placeholder,
         };
+        break;
       case 'textarea':
-        return {
+        component = {
           type: 'TextArea',
           label: q.text,
           name: q.id,
           required: q.required !== false,
-          // placeholder: q.placeholder,
         };
+        break;
       case 'date':
-        return {
+        component = {
           type: 'DatePicker',
           label: q.text,
           name: q.id,
           required: q.required !== false,
         };
+        break;
       default:
-        return {
+        component = {
           type: 'TextBody',
           text: q.text,
         };
+        break;
     }
+
+    // --- DYNAMIC LOGIC INJECTION ---
+    if (q.showIf && q.showIf.dependsOn && q.showIf.equals !== undefined) {
+      // We must also sanitize the 'equals' string so it matches the sanitized option ID
+      const sanitizedEquals = sanitizeId(q.showIf.equals);
+      
+      // Constructs: "${form.question_id == 'Target_Value'}"
+      component.visible = `\${form.${q.showIf.dependsOn} == '${sanitizedEquals}'}`;
+    }
+
+    return component;
   });
 
   // 2. Build the Flow JSON structure
   return {
     version: '7.0',
-    
-    // REQUIRED for data_exchange flows
     data_api_version: '3.0',
-
-    // data_channel_uri: endpointUrl,
-
-    // REQUIRED for navigation between screens
     routing_model: {
       INTRO: ['QUESTIONS'],
       QUESTIONS: ['COMPLETE'],
       COMPLETE: [],
     },
-
     screens: [
       {
         id: 'INTRO',

@@ -76,7 +76,7 @@ const PORT =
 
 
 const URL =
-  process.env.REMOTE_URL?.replace(/\/$/, '') ||
+  process.env.LOCAL_URL?.replace(/\/$/, '') ||
   process.env.SERVER_URL?.replace(/\/$/, '');
 
 app.use(express.json());
@@ -153,30 +153,7 @@ const swaggerDocument = {
   ],
   components: {
     schemas: {
-      MetaFlowQuestion: {
-        type: 'object',
-        description: 'A single survey question for a Meta WhatsApp Flow',
-        required: ['id', 'text', 'type'],
-        properties: {
-          id: { type: 'string', description: 'Unique field name (snake_case, no spaces). Used as the form field key in submissions.', example: 'satisfaction' },
-          text: { type: 'string', description: 'Question text shown to the user (max 80 chars).', example: 'How satisfied are you with our service?' },
-          type: {
-            type: 'string',
-            description: `Component type:
-  • **list**     → \`Dropdown\` — best for 3–10 choices (max 200 options, each max 30 chars)
-  • **button**   → \`RadioButtonsGroup\` — best for 2–5 choices (each max 30 chars)
-  • **text**     → \`TextInput\` — single-line free text
-  • **textarea** → \`TextArea\` — multi-line free text
-  • **date**     → \`DatePicker\``,
-            enum: ['list', 'button', 'text', 'textarea', 'date'],
-            example: 'list'
-          },
-          options: { type: 'array', items: { type: 'string' }, description: 'Required for type `list` and `button`.', example: ['Very Satisfied','Satisfied','Neutral','Dissatisfied','Very Dissatisfied'] },
-          required: { type: 'boolean', description: 'Whether the field is mandatory. Defaults to `true`.', default: true },
-          placeholder: { type: 'string', description: 'Helper text shown inside the input component (max 80 chars).' },
-          sectionTitle: { type: 'string', description: 'Label for `RadioButtonsGroup` (max 30 chars). Falls back to `text` if omitted.' }
-        }
-      },
+
       MetaFlowSurveyDefinition: {
         type: 'object',
         required: ['name', 'questions'],
@@ -189,7 +166,32 @@ const swaggerDocument = {
           autoPublish: { type: 'boolean', default: false, description: 'If true, publishes immediately after upload. **Irreversible** — published flows cannot be unpublished.' },
           dataEndpointUrl: { type: 'string', example: 'https://your-server.ngrok.io/webhook/meta-flow-data', description: 'HTTPS URL of your data endpoint. Defaults to `SERVER_URL + /webhook/meta-flow-data`.' }
         }
-      },
+    },
+
+    MetaFlowQuestion: {
+      type: 'object',
+      required: ['id', 'text', 'type'],
+      properties: {
+        id: { type: 'string', description: 'Unique identifier used as the form field name.' },
+        text: { type: 'string', description: 'The question text shown to the user.' },
+        type: { type: 'string', enum: ['list', 'button', 'text', 'textarea', 'date'], description: 'The UI component type.' },
+        options: { type: 'array', items: { type: 'string' }, description: 'Array of strings for list or button types.' },
+        required: { type: 'boolean', default: true, description: 'Whether the field is mandatory.' },
+        placeholder: { type: 'string', description: 'Helper text shown inside the component.' },
+        sectionTitle: { type: 'string', description: 'Optional section label for RadioButtonsGroup.' },
+        showIf: { $ref: '#/components/schemas/FlowCondition', description: 'Optional condition to control visibility dynamically.' }
+      }
+    },
+
+    FlowCondition: {
+      type: 'object',
+      required: ['dependsOn', 'equals'],
+      properties: {
+        dependsOn: { type: 'string', description: 'The ID of the parent question to watch.' },
+        equals: { type: 'string', description: 'The specific answer value that triggers this question to become visible.' }
+      }
+    },
+
       SurveyQuestion: {
         type: 'object',
         properties: {
@@ -437,6 +439,9 @@ const swaggerDocument = {
   | \`textarea\` | TextArea | Long free text | — |
   | \`date\` | DatePicker | Date selection | — |
 
+  ### Conditional Visibility
+  You can dynamically show or hide questions on the client side using the \`showIf\` property. This evaluates the user's selection in real-time. If a hidden field is marked as required, Meta automatically bypasses the validation.
+
   ### Flow screen layout
   \`\`\`
   INTRO (navigate) → QUESTIONS (data_exchange) → COMPLETE (terminal)
@@ -450,17 +455,60 @@ const swaggerDocument = {
               schema: { $ref: '#/components/schemas/MetaFlowSurveyDefinition' },
               examples: {
                 csat: {
-                  summary: 'CSAT Survey (3 questions, mixed types)',
+                  summary: 'CSAT Survey (with conditional visibility)',
                   value: {
                     name: 'Post-Transaction Survey',
                     description: 'Help us improve your banking experience. Takes 1 minute.',
                     surveyId: 'csat-q1-2026',
                     thankYouText: 'Thank you! Your feedback helps us serve you better.',
                     autoPublish: false,
-                    questions: [
-                      { id: 'satisfaction', text: 'How satisfied are you with our service?', type: 'list', options: ['Very Satisfied','Satisfied','Neutral','Dissatisfied','Very Dissatisfied'], required: true },
-                      { id: 'recommend', text: 'Would you recommend FBNBank to a friend?', type: 'button', options: ['Yes','No','Maybe'], required: true },
-                      { id: 'improvement', text: 'What can we improve?', type: 'textarea', required: false, placeholder: 'Tell us what you think...' }
+                    "questions": [
+                      { 
+                        "id": "satisfaction", 
+                        "text": "How satisfied are you with our service?", 
+                        "type": "list", 
+                        "options": [
+                          "Very Satisfied",
+                          "Satisfied",
+                          "Neutral",
+                          "Dissatisfied",
+                          "Very Dissatisfied"
+                        ], 
+                        "required": true 
+                      },
+                      { 
+                        "id": "satisfaction_reason", 
+                        "text": "We are sorry to hear that. What went wrong?", 
+                        "type": "textarea", 
+                        "required": false, 
+                        "placeholder": "Please share your experience...",
+                        "showIf": { 
+                          "dependsOn": "satisfaction", 
+                          "equals": "Very Dissatisfied" 
+                        }
+                      },
+                      { 
+                        "id": "recommend", 
+                        "text": "Would you recommend FBNBank to a friend?", 
+                        "type": "button", 
+                        "options": [
+                          "Yes",
+                          "No",
+                          "Maybe"
+                        ], 
+                        "required": true 
+                      },
+                      { 
+                        "id": "improvement", 
+                        "text": "What is the main reason you wouldn't recommend us?", 
+                        "type": "textarea", 
+                        "required": false, 
+                        "placeholder": "Tell us how we can improve...",
+                        "showIf": { 
+                          "dependsOn": "recommend", 
+                          "equals": "No" 
+                        }
+                      }
                     ]
                   }
                 },
@@ -517,6 +565,8 @@ const swaggerDocument = {
         }
       }
     },
+
+
 
   '/admin/meta-survey/{flowId}': {
     get: {
