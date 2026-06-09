@@ -116,7 +116,7 @@ export async function handleSurveyMessage({
 
     await sendMessage(
       phone,
-      "ðŸšª You have exited the survey. Your responses have been saved."
+      "You have exited the survey. Your responses have been saved."
     )
     return
   }
@@ -143,7 +143,7 @@ export async function handleSurveyMessage({
     const firstIndex = findNextVisibleQuestion(Array.isArray(questions) ? questions : [], 0, {});
     if (!Array.isArray(questions) || firstIndex >= questions.length) {
       await completeSession(db, session.id)
-      await sendMessage(phone, 'ðŸŽ‰ Thanks! Survey completed.')
+      await sendMessage(phone, 'Thanks! Survey completed.')
       return
     }
 
@@ -165,7 +165,7 @@ export async function handleSurveyMessage({
   const currentQuestion = Array.isArray(questions) ? questions[currentIndex] : undefined
 
   console.log(
-    `ðŸ“ Answer received for Q${currentIndex + 1}:`,
+    `Answer received for Q${currentIndex + 1}:`,
     rawAnswer,
     { buttonReply, listReply, textBody }
   )
@@ -179,7 +179,7 @@ export async function handleSurveyMessage({
     showIf: currentQuestion?.showIf,
   })
 
-  // â”€â”€â”€ 1. VALIDATION (ONLY FOR BUTTON/LIST) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // VALIDATION (ONLY FOR BUTTON/LIST) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let responseTextToSave = rawAnswer;
   let responseIdToSave = message.id;
 
@@ -206,8 +206,8 @@ export async function handleSurveyMessage({
       const normalizedAnswer = normalizeForMatch(rawAnswer || '');
       console.log('normalizedOptions:', normalizedOptions, 'normalizedAnswer:', normalizedAnswer)
       if (!normalizedOptions.includes(normalizedAnswer)) {
-        console.log("âŒ Invalid option provided - resending question")
-        await sendMessage(phone, "ðŸ™‚ Please select from the available options below")
+        console.log("Invalid option provided - resending question")
+        await sendMessage(phone,  "Please select from the available options below")
         // Re-send SAME question (do NOT move forward)
         return sendQuestion(phone, currentQuestion, session)
       }
@@ -247,7 +247,7 @@ export async function handleSurveyMessage({
 
     await sendMessage(
       phone,
-      `ðŸŽ‰ Thanks! Survey completed.\n\nThis is what we received:\n\n${recapLines}`
+      `Thanks! Survey completed.\n\nThis is what we received:\n\n${recapLines}`
     )
     return
   }
