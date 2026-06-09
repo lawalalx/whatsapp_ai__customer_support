@@ -537,17 +537,74 @@ export async function countMetaFlowResponses(
 
 export function mapResponsesToQuestions(responses: Record<string, any>, questionsData: any[]) {
   return Object.entries(responses).map(([key, value]) => {
-    // 1. Look for the question in your questions_data array
-    // Your FlowQuestion uses 'id' and 'text'
     const question = questionsData.find(q => q.id === key || q.name === key);
-    
-
-    console.log(`\n\nMapping response key: ${key} to question: ${question ? question.text || question.label || question.title : 'Unknown Question'}`);  
     return {
       field_id: key,
-      // Check .text (from your interface) first, then .label/.title as fallbacks
       question_text: question ? (question.text || question.label || question.title) : key,
       answer: value
     };
   });
+}
+
+// ─── Accumulated Responses (multi-screen partial saves) ───────────────────────
+
+/**
+ * Returns the merged answers accumulated so far for a given flow_token.
+ * Used by the data_exchange handler to make conditional navigation decisions.
+ */
+export async function getAccumulatedFlowResponses(
+  db: any,
+  flowToken: string,
+): Promise<Record<string, any>> {
+  const sql = `SELECT answers FROM meta_flow_accumulated WHERE flow_token = $1 LIMIT 1`;
+  let row: any;
+  if (typeof db.oneOrNone === 'function') {
+    row = await db.oneOrNone(sql, [flowToken]);
+  } else {
+    const result = await db.query(sql, [flowToken]);
+    row = result.rows[0] ?? null;
+  }
+  if (!row) return {};
+  try {
+    return typeof row.answers === 'string' ? JSON.parse(row.answers) : row.answers ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Upserts the accumulated answers for a flow_token (one row per session).
+ * Called on every data_exchange screen submission to merge partial answers.
+ */
+export async function upsertAccumulatedFlowResponses(
+  db: any,
+  params: {
+    flowToken: string;
+    flowId: string;
+    surveyId?: string;
+    customerPhone?: string;
+    answers: Record<string, any>;
+  },
+): Promise<void> {
+  const { flowToken, flowId, surveyId, customerPhone, answers } = params;
+  const sql = `
+    INSERT INTO meta_flow_accumulated
+      (flow_token, flow_id, survey_id, customer_phone, answers, created_at, updated_at)
+    VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+    ON CONFLICT (flow_token) DO UPDATE SET
+      answers      = $5,
+      updated_at   = NOW()
+  `;
+  const values = [
+    flowToken,
+    flowId,
+    surveyId ?? null,
+    customerPhone ?? null,
+    JSON.stringify(answers),
+  ];
+  if (typeof db.none === 'function') {
+    await db.none(sql, values);
+  } else {
+    await db.query(sql, values);
+  }
 }

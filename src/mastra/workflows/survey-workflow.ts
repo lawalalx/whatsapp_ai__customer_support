@@ -43,12 +43,14 @@ async function loadManualSurveyQuestions(surveyId?: string, mode?:  'manual' | '
   if (!Array.isArray(questions)) return null;
 
   return questions.map((q: any) => ({
+    id: q.id,
     question: q.text,
     options: q.options || [],
     type: q.type,
     text: q.text,
     sectionTitle: q.sectionTitle,
     placeholder: q.placeholder,
+    showIf: q.showIf,
   }));
 }
 
@@ -63,12 +65,14 @@ const generateSurveyContent = createStep({
   }),
   outputSchema: z.object({
     questions: z.array(z.object({
+      id: z.string().optional(),
       question: z.string(),
       options: z.array(z.string()),
       type: z.enum(['button', 'list', 'text']).optional(),
       text: z.string().optional(),
       sectionTitle: z.string().optional(),
       placeholder: z.string().optional(),
+      showIf: z.object({ dependsOn: z.string(), equals: z.string() }).optional(),
     })),
   }),
   execute: async ({ inputData, mastra }) => {
@@ -179,12 +183,14 @@ const sendSurveyQuestions = createStep({
     surveyId: z.string(),
     surveyIntroTemplateId: z.string().optional(),
     questions: z.array(z.object({
+      id: z.string().optional(),
       question: z.string(),
       options: z.array(z.string()),
       type: z.enum(['button', 'list', 'text']).optional(),
       text: z.string().optional(),
       sectionTitle: z.string().optional(),
       placeholder: z.string().optional(),
+      showIf: z.object({ dependsOn: z.string(), equals: z.string() }).optional(),
     })),
   }),
   outputSchema: z.object({
@@ -282,12 +288,14 @@ export const surveyWorkflow = createWorkflow({
     surveyId: string;
     surveyIntroTemplateId?: string;
     questions: Array<{
+      id?: string;
       question: string;
       options: string[];
       type?: 'button' | 'list' | 'text';
       text?: string;
       sectionTitle?: string;
       placeholder?: string;
+      showIf?: { dependsOn: string; equals: string };
     }>;
   }> => {
     const initData = getInitData<typeof surveyWorkflow>()

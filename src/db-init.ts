@@ -436,6 +436,25 @@ export const initDatabase = async () => {
         `
       );
 
+      await runMigration(
+        client,
+        '2026_06_meta_flow_accumulated',
+        `
+          CREATE TABLE IF NOT EXISTS meta_flow_accumulated (
+            flow_token      TEXT PRIMARY KEY,
+            flow_id         TEXT NOT NULL,
+            survey_id       TEXT,
+            customer_phone  TEXT,
+            answers         JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_meta_flow_accumulated_flow_id
+          ON meta_flow_accumulated (flow_id);
+        `
+      );
+
     client.release();
 
     console.log('✅ Database initialized successfully!');

@@ -19,7 +19,7 @@ import { initDatabase } from './db-init.js';
 import { routeIncomingMessage } from './webhook/router.js';
 
 // Meta WhatsApp Flow Surveys
-import { buildSurveyFlowJson } from './meta-flow/flow-builder.js';
+import { buildSurveyFlowJson, computeVisibilityData, sanitizeOptionId } from './meta-flow/flow-builder.js';
 import * as metaSurveyService from './meta-flow/meta-survey.service.js';
 import {
   createMetaFlow,
@@ -76,7 +76,7 @@ const PORT =
 
 
 const URL =
-  process.env.LOCAL_URL?.replace(/\/$/, '') ||
+  process.env.REMOTE_URL?.replace(/\/$/, '') ||
   process.env.SERVER_URL?.replace(/\/$/, '');
 
 app.use(express.json());
@@ -194,22 +194,29 @@ const swaggerDocument = {
 
       SurveyQuestion: {
         type: 'object',
+        required: ['id', 'text', 'type'],
         properties: {
-          id: { type: 'string' },
-          text: { type: 'string' },
-          options: { type: 'array', items: { type: 'string' } },
-          type: { type: 'string', enum: ['button','list','text'] },
-        },
-        required: ['id','text','type']
+          id: { type: 'string', example: 'satisfaction', description: 'Unique field identifier (no spaces). Used to reference this question in `showIf.dependsOn`.' },
+          text: { type: 'string', example: 'How satisfied are you with our service?', description: 'The question text shown to the customer.' },
+          type: { type: 'string', enum: ['button', 'list', 'text'], description: '`button` = interactive reply buttons (max 3); `list` = scrollable list (max 10); `text` = free-text reply.' },
+          options: { type: 'array', items: { type: 'string' }, example: ['Very Satisfied', 'Satisfied', 'Neutral', 'Dissatisfied', 'Very Dissatisfied'], description: 'Required for `button` and `list` types.' },
+          sectionTitle: { type: 'string', example: 'Rating', description: 'Optional header shown above a button group.' },
+          placeholder: { type: 'string', example: 'Please share your experience…', description: 'Placeholder/hint text for free-text questions.' },
+          showIf: {
+            $ref: '#/components/schemas/FlowCondition',
+            description: 'When set, this question is only sent if the referenced parent question received the specified answer. Skipped silently otherwise.'
+          }
+        }
       },
       SurveyTemplate: {
         type: 'object',
+        required: ['id', 'name', 'questions'],
         properties: {
-          id: { type: 'string' },
-          name: { type: 'string' },
-          questions: { type: 'array', items: { $ref: '#/components/schemas/SurveyQuestion' } }
-        },
-        required: ['id','name','questions']
+          id: { type: 'string', example: 'csat-q2-2026', description: 'Unique survey identifier. Used when triggering this survey via `/admin/send-survey`.' },
+          name: { type: 'string', example: 'Post-Transaction Satisfaction Survey', description: 'Human-readable survey name stored in the DB.' },
+          mode: { type: 'string', enum: ['manual', 'ai', 'meta'], default: 'manual', description: '`manual` = predefined questions; `ai` = AI-generated; `meta` = WhatsApp Flow.' },
+          questions: { type: 'array', items: { $ref: '#/components/schemas/SurveyQuestion' }, description: 'Ordered list of questions. Conditional questions (with `showIf`) are automatically skipped if their condition is not met.' }
+        }
       }
     }
   },
@@ -849,68 +856,140 @@ const swaggerDocument = {
   },
 
   '/admin/survey': {
-
     post: {
-
       summary: 'Create a manual survey',
-
       tags: ['Admin - AI/Manual Survey'],
+      description: `Creates a reusable survey definition stored in the \`surveys\` table.
 
-      description: `
+These surveys power the **manual** mode — when triggering a survey via \`/admin/send-survey\`, the system sends questions one-by-one over WhatsApp chat using the template defined here.
 
-      Creates a reusable survey and stores it in the surveys table.
+### Question types
+| type | WhatsApp component | Best for |
+|------|--------------------|----------|
+| \`button\` | Interactive reply buttons | 2–3 choices |
+| \`list\` | Interactive list picker | 4–10 choices |
+| \`text\` | Plain text reply | Free-form answers |
 
+### Conditional visibility (\`showIf\`)
+A question with \`showIf\` is only sent if the customer's previous answer matches. Otherwise it is silently skipped and the next applicable question is sent immediately.
 
+\`\`\`json
+{ "dependsOn": "satisfaction", "equals": "Very Dissatisfied" }
+\`\`\`
 
-      These surveys are used in "manual" mode when sending surveys,
-
-      allowing predefined question flows instead of AI-generated ones.
-
-
-
-      Use cases:
-
-      - Regulatory-compliant surveys
-
-      - Fixed questionnaires (e.g., NPS, onboarding feedback)
-
-      - Customer satisfaction surveys
-
-      - Product feedback collection
-
-
-
-      The survey definition must follow the SurveyTemplate schema.
-
-      `,
+Use cases:
+- Regulatory-compliant fixed questionnaires
+- NPS / onboarding / CSAT flows
+- Conditional follow-up questions based on prior answers`,
 
       requestBody: {
-
         required: true,
-
         content: {
-
           'application/json': {
-
-            schema: { $ref: '#/components/schemas/SurveyTemplate' }
-
-          }
-
-        }
-
+            schema: { $ref: '#/components/schemas/SurveyTemplate' },
+            examples: {
+              csat_with_conditional: {
+                summary: 'CSAT Survey with conditional follow-up',
+                value: {
+                  id: 'csat-q2-2026',
+                  name: 'Post-Transaction Satisfaction Survey',
+                  mode: 'manual',
+                  questions: [
+                    {
+                      id: 'satisfaction',
+                      text: 'How satisfied are you with our service today?',
+                      type: 'list',
+                      options: ['Very Satisfied', 'Satisfied', 'Neutral', 'Dissatisfied', 'Very Dissatisfied'],
+                    },
+                    {
+                      id: 'satisfaction_reason',
+                      text: 'We are sorry to hear that. What went wrong?',
+                      type: 'text',
+                      placeholder: 'Please describe your experience…',
+                      showIf: { dependsOn: 'satisfaction', equals: 'Very Dissatisfied' },
+                    },
+                    {
+                      id: 'recommend',
+                      text: 'Would you recommend FBNBank to a friend or colleague?',
+                      type: 'button',
+                      options: ['Yes', 'No', 'Maybe'],
+                    },
+                    {
+                      id: 'improvement',
+                      text: 'What is the main reason you would not recommend us?',
+                      type: 'text',
+                      placeholder: 'Tell us how we can improve…',
+                      showIf: { dependsOn: 'recommend', equals: 'No' },
+                    },
+                  ],
+                },
+              },
+              nps: {
+                summary: 'Simple NPS Survey (no conditionals)',
+                value: {
+                  id: 'nps-2026',
+                  name: 'Net Promoter Score',
+                  mode: 'manual',
+                  questions: [
+                    {
+                      id: 'nps_score',
+                      text: 'On a scale of 1–10, how likely are you to recommend FBNBank to a friend?',
+                      type: 'list',
+                      options: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
+                    },
+                    {
+                      id: 'nps_reason',
+                      text: 'What is the main reason for your score?',
+                      type: 'text',
+                      placeholder: 'Tell us more…',
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
       },
 
       responses: {
-
-        '201': { description: 'Survey created successfully' },
-
-        '400': { description: 'Validation failed (invalid structure)' },
-
-        '500': { description: 'Failed to create survey' }
-
-      }
-
-    }
+        '201': {
+          description: 'Survey created successfully',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean', example: true },
+                  survey: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string', example: 'csat-q2-2026' },
+                      name: { type: 'string', example: 'Post-Transaction Satisfaction Survey' },
+                      mode: { type: 'string', example: 'manual' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        '400': {
+          description: 'Validation failed — missing required fields or invalid question type',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  error: { type: 'string', example: 'validation_failed' },
+                  details: { type: 'object' },
+                },
+              },
+            },
+          },
+        },
+        '500': { description: 'Failed to create survey' },
+      },
+    },
   },
 
   '/admin/survey/{surveyId}/archive': {
@@ -2629,6 +2708,10 @@ const SurveyQuestionSchema = z.object({
   type: z.enum(['button', 'list', 'text']),
   sectionTitle: z.string().optional(),
   placeholder: z.string().optional(),
+  showIf: z.object({
+    dependsOn: z.string(),
+    equals: z.string(),
+  }).optional(),
 });
 
 const SurveyTemplateSchema = z.object({
@@ -3879,7 +3962,7 @@ app.post('/admin/meta-survey/:flowId/publish', async (req: Request, res: Respons
 
     console.log("RE-UPLOADING FLOW JSON:", JSON.stringify(flowJson, null, 2));
 
-    // ✅ STEP 2 — RE-UPLOAD (CRUCIAL FIX)
+    //  STEP 2 — RE-UPLOAD (CRUCIAL FIX)
     await uploadFlowJsonBuffer(
       flowId,
       Buffer.from(JSON.stringify(flowJson))
@@ -3889,6 +3972,12 @@ app.post('/admin/meta-survey/:flowId/publish', async (req: Request, res: Respons
     const flowCheck = await getFlow(flowId);
     console.log("✅ VALIDATION AFTER UPLOAD:", flowCheck.validation_errors);
 
+    if (flowCheck.validation_errors && flowCheck.validation_errors.length > 0) {
+      return res.status(422).json({
+        error: 'Flow JSON has validation errors — cannot publish',
+        validation_errors: flowCheck.validation_errors,
+      });
+    }
 
     // ✅ STEP 3 — NOW publish
     const result = await publishFlow(flowId);
@@ -3902,6 +3991,7 @@ app.post('/admin/meta-survey/:flowId/publish', async (req: Request, res: Respons
     return res.status(500).json({ error: e.message || 'Publish failed' });
   }
 });
+
 
 app.post('/admin/meta-survey/:flowId/deprecate', async (req: Request, res: Response) => {
   const { flowId } = req.params;
@@ -4252,18 +4342,19 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
         if (db) {
           const flowToken = payload?.flow_token || payload?.data?.flow_token || payload?.context?.flow_token;
           const payloadFlowId = payload?.flow_id || payload?.data?.flow_id || payload?.context?.flow_id;
-          const responseData = (payload?.data && typeof payload.data === 'object') ? payload.data : {};
-          
+          const responseData: Record<string, any> = (payload?.data && typeof payload.data === 'object') ? payload.data : {};
+
           if (flowToken) {
             let flowId = payloadFlowId ? String(payloadFlowId) : 'unknown';
             let surveyId: string | undefined;
-            let customerPhone: string | undefined; // 1. Add this variable
+            let customerPhone: string | undefined;
+            let questionsData: any[] = [];
 
-            // 2. ALWAYS look up the token map to get the phone number
+            // Look up token map to get phone + flow metadata
             try {
               const tokenMap = await metaSurveyService.getMetaFlowTokenMapByToken(db, String(flowToken));
               if (tokenMap) {
-                customerPhone = tokenMap.customer_phone; // ✅ FOUND THE PHONE!
+                customerPhone = tokenMap.customer_phone;
                 surveyId = tokenMap.survey_id || undefined;
                 if (flowId === 'unknown' && tokenMap.flow_id) {
                   flowId = tokenMap.flow_id;
@@ -4273,74 +4364,80 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
               console.error('Token lookup failed:', lookupErr);
             }
 
-            // 3. Fallback for surveyId if tokenMap didn't have it
-            if (!surveyId && flowId !== 'unknown') {
+            // Get questions data for visibility computation
+            if (flowId !== 'unknown') {
               try {
                 const localFlow = await metaSurveyService.getMetaFlowSurveyByFlowId(db, String(flowId));
-                surveyId = localFlow?.survey_id || undefined;
+                surveyId = surveyId || localFlow?.survey_id || undefined;
+                questionsData = Array.isArray(localFlow?.questions_data) ? localFlow.questions_data : [];
               } catch {}
             }
-            
 
+            // Strip internal flags before saving answers
+            const { __submit__, ...answerFields } = responseData as any;
 
-            // 4. Pass the phone number to the save function
-            await metaSurveyService.saveMetaFlowResponse(db, {
-              flowId: String(flowId),
+            // Merge with previously accumulated answers
+            const existing = await metaSurveyService.getAccumulatedFlowResponses(db, String(flowToken));
+            const allAnswers = { ...existing, ...answerFields };
+
+            // Persist accumulated partial answers
+            await metaSurveyService.upsertAccumulatedFlowResponses(db, {
               flowToken: String(flowToken),
-              customerPhone: customerPhone,
+              flowId: String(flowId),
               surveyId,
-              responses: responseData,
-              source: 'data_exchange',
+              customerPhone,
+              answers: allAnswers,
             });
 
-            const verify = await db.query(
-              `
-              SELECT *
-              FROM meta_flow_responses
-              WHERE flow_token = $1
-              ORDER BY created_at DESC
-              LIMIT 1
-              `,
-              [flowToken]
-            );
+            // ── FINAL SUBMIT ────────────────────────────────────────────────
+            if (String(__submit__) === '1') {
+              await metaSurveyService.saveMetaFlowResponse(db, {
+                flowId: String(flowId),
+                flowToken: String(flowToken),
+                customerPhone,
+                surveyId,
+                responses: allAnswers,
+                source: 'data_exchange',
+              });
+              console.log(`✅ Final response saved for phone: ${customerPhone}`);
 
-            console.log(
-              "VERIFY SAVED:",
-              JSON.stringify(verify.rows, null, 2)
-            );
-            
-            console.log(`✅ Saved response for phone: ${customerPhone}`);
+              return res.status(200).type('text/plain').send(encryptResponse({
+                version: payload.version || '3.0',
+                screen: 'COMPLETE',
+                data: {},
+              }));
+            }
+
+            // ── INTERMEDIATE UPDATE (parent question selection changed) ─────
+            // Recompute which conditional questions should be visible
+            const visibilityData = computeVisibilityData(questionsData, allAnswers);
+            console.log('🔄 Visibility update:', visibilityData, 'answers:', allAnswers);
+
+            return res.status(200).type('text/plain').send(encryptResponse({
+              version: payload.version || '3.0',
+              screen: 'QUESTIONS',
+              data: visibilityData,
+            }));
           }
         }
       } catch (saveErr) {
         console.error('❌ Failed to save data_exchange response', saveErr);
       }
-    }
 
-
-
-    if (payload.action !== 'data_exchange') {
-      console.log('Ignoring non-data_exchange payload:', payload.action);
-      return res.status(200).send(encryptResponse({
+      // Fallback
+      return res.status(200).type('text/plain').send(encryptResponse({
         version: payload.version || '3.0',
         screen: 'COMPLETE',
-        data: {}
+        data: {},
       }));
     }
 
-
-    const responsePayload = {
+    // Non-data_exchange action fallback
+    return res.status(200).type('text/plain').send(encryptResponse({
       version: payload.version || '3.0',
       screen: 'COMPLETE',
-      data: {
-        acknowledgement: 'received',
-      },
-    };
-
-    // ─────────────────────────────────────────────
-    // 6️⃣ NORMAL FLOW RESPONSE (BASE64 STRING)
-    // ─────────────────────────────────────────────
-    return res.status(200).type('text/plain').send(encryptResponse(responsePayload));
+      data: {},
+    }));
 
   } catch (err: any) {
     console.error('❌ META FLOW FAILURE', err);
