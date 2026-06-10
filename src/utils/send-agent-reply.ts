@@ -63,7 +63,7 @@ export async function sendAgentReply(phone: string, rawText: string, phoneNumber
 
   if (options && options.length >= 2) {
     // Trim to WhatsApp's 1024-char body limit
-    const bodyText = text.length <= 1024 ? text : text.substring(0, 1021) + '…';
+    const bodyText = text.length <= 1024 ? text : text.substring(0, 1021) + '...';
 
     const rows = options.map(opt => ({
       id: opt.id,

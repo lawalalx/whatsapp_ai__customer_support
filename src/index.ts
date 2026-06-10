@@ -201,7 +201,7 @@ const swaggerDocument = {
           type: { type: 'string', enum: ['button', 'list', 'text'], description: '`button` = interactive reply buttons (max 3); `list` = scrollable list (max 10); `text` = free-text reply.' },
           options: { type: 'array', items: { type: 'string' }, example: ['Very Satisfied', 'Satisfied', 'Neutral', 'Dissatisfied', 'Very Dissatisfied'], description: 'Required for `button` and `list` types.' },
           sectionTitle: { type: 'string', example: 'Rating', description: 'Optional header shown above a button group.' },
-          placeholder: { type: 'string', example: 'Please share your experience…', description: 'Placeholder/hint text for free-text questions.' },
+          placeholder: { type: 'string', example: 'Please share your experience...', description: 'Placeholder/hint text for free-text questions.' },
           showIf: {
             $ref: '#/components/schemas/FlowCondition',
             description: 'When set, this question is only sent if the referenced parent question received the specified answer. Skipped silently otherwise.'
@@ -905,7 +905,7 @@ Use cases:
                       id: 'satisfaction_reason',
                       text: 'We are sorry to hear that. What went wrong?',
                       type: 'text',
-                      placeholder: 'Please describe your experience…',
+                      placeholder: 'Please describe your experience...',
                       showIf: { dependsOn: 'satisfaction', equals: 'Very Dissatisfied' },
                     },
                     {
@@ -918,7 +918,7 @@ Use cases:
                       id: 'improvement',
                       text: 'What is the main reason you would not recommend us?',
                       type: 'text',
-                      placeholder: 'Tell us how we can improve…',
+                      placeholder: 'Tell us how we can improve...',
                       showIf: { dependsOn: 'recommend', equals: 'No' },
                     },
                   ],
@@ -941,7 +941,7 @@ Use cases:
                       id: 'nps_reason',
                       text: 'What is the main reason for your score?',
                       type: 'text',
-                      placeholder: 'Tell us more…',
+                      placeholder: 'Tell us more...',
                     },
                   ],
                 },
@@ -4325,13 +4325,37 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
     }
 
     if (payload.action === 'INIT' || payload.action === 'BACK') {
-      const responsePayload = {
+      // For dynamic-visibility flows we must return the initial data block
+      // (all show_xxx = false) so conditional questions start hidden.
+      let initData: Record<string, boolean> = {};
+      try {
+        const storage = mastra.getStorage() as any;
+        const db = storage?.db;
+        if (db) {
+          const payloadFlowId = payload?.flow_id || payload?.data?.flow_id || payload?.context?.flow_id;
+          const flowToken = payload?.flow_token || payload?.data?.flow_token || payload?.context?.flow_token;
+          let flowId = payloadFlowId ? String(payloadFlowId) : 'unknown';
+          if (flowId === 'unknown' && flowToken) {
+            try {
+              const tokenMap = await metaSurveyService.getMetaFlowTokenMapByToken(db, String(flowToken));
+              if (tokenMap?.flow_id) flowId = tokenMap.flow_id;
+            } catch {}
+          }
+          if (flowId !== 'unknown') {
+            const localFlow = await metaSurveyService.getMetaFlowSurveyByFlowId(db, flowId);
+            const questions: any[] = Array.isArray(localFlow?.questions_data) ? localFlow.questions_data : [];
+            for (const q of questions) {
+              if (q.showIf) initData[`show_${q.id}`] = false;
+            }
+          }
+        }
+      } catch {}
+
+      return res.status(200).type('text/plain').send(encryptResponse({
         version: payload.version || '3.0',
         screen: payload.screen || 'QUESTIONS',
-        data: {},
-      };
-
-      return res.status(200).type('text/plain').send(encryptResponse(responsePayload));
+        data: initData,
+      }));
     }
 
     if (payload.action === 'data_exchange') {
