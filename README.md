@@ -6,7 +6,7 @@ Welcome to your new [Mastra](https://mastra.ai/) project! We're excited to see w
 
 Start the development server..:;;;
 
-```shell
+```shellhhh
 pnpm run dev
 ```
 
