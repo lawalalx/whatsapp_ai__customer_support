@@ -11,6 +11,7 @@ export async function sendSurveyIntro({
   phoneNumberId?: string;
   surveyIntroTemplateId?: string;
 }) {
+  // This rich fallback card is shown when no template is configured or the template send fails
   const introText = `📊 *Dear Valued Customer,*\n\nWelcome to the *FBNBank Customer Survey*.\n\nPlease help us fill out this quick survey. Your feedback is incredibly important to us and helps us improve our services for you! 🌟\n\n⏱️ *Time:* Less than 2 minutes\n🛑 _Type *EXIT* at any time to stop._`;
 
   // Track intro as survey outbound so a typed "proceed" is routed to survey handler.
@@ -20,35 +21,32 @@ export async function sendSurveyIntro({
 
   if (proactiveTemplate) {
     console.log('Attempting proactive template for survey intro:', proactiveTemplate);
-    const templateSent = await sendWhatsAppTemplate({
-      to,
-      templateId: proactiveTemplate,
-      phoneNumberId,
-      templateData: {},
-    });
-    if (templateSent) {
-      console.log(
-        'Template sent successfully. Sending Proceed button...'
-      );
-
-      return sendWhatsAppSurvey({
+    try {
+      const templateSent = await sendWhatsAppTemplate({
         to,
-        question: "Please click Proceed to start the survey ot type 'end' to stop.",
-        options: [
-          {
-            id: 'survey_intro_proceed',
-            title: 'Proceed',
-          },
-        ],
-        headerText: '',
-        footerText: '',
+        templateId: proactiveTemplate,
         phoneNumberId,
+        templateData: {},
       });
+      if (templateSent) {
+        console.log('✅ Survey intro template sent. Sending Proceed button...');
+        // Template is text-only — send the interactive Proceed button as a follow-up
+        return sendWhatsAppSurvey({
+          to,
+          question: "Click the button below to start the survey, or type 'end' to stop.",
+          options: [{ id: 'survey_intro_proceed', title: 'Proceed' }],
+          headerText: '',
+          footerText: '',
+          phoneNumberId,
+        });
+      }
+    } catch (err) {
+      console.warn('Proactive intro template threw an error; falling back to interactive card.', err);
     }
-
-    console.warn('Proactive intro template send failed; falling back to interactive Proceed intro card.');
+    console.warn('Proactive intro template send failed; falling back to interactive intro card.');
   }
 
+  // Fallback: rich interactive card with Proceed button (matches image 3)
   return sendWhatsAppSurvey({
     to,
     question: introText,

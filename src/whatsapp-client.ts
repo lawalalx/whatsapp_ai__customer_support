@@ -63,6 +63,19 @@ async function post(payload: Record<string, unknown>, context?: WhatsAppRequestC
         console.warn('⚠️ WhatsApp API returned empty body despite 2xx status');
       } else if (!data.messages && !data.error) {
         console.warn('⚠️ WhatsApp API 2xx response without messages or error field:', Object.keys(data));
+      } else if (data.messages) {
+        // Log message_status — Meta can return 200 but status="failed" silently
+        data.messages.forEach((m: any) => {
+          if (m.message_status && m.message_status !== 'accepted') {
+            console.warn(`⚠️ Message ${m.id} status: ${m.message_status} — may not be delivered`);
+          } else {
+            console.log(`📨 Message ${m.id} status: ${m.message_status ?? 'accepted'}`);
+          }
+        });
+      }
+      // Surface any error embedded in a 2xx response (Meta sometimes does this)
+      if (data?.error) {
+        console.error('❌ Meta returned error inside 2xx:', JSON.stringify(data.error, null, 2));
       }
     }
 
@@ -209,26 +222,19 @@ export async function sendWhatsAppTemplate({
     JSON.stringify(data, null, 2)
   );
 
-  if (ok) {
+  if (ok && !data?.error) {
     const msgId = data?.messages?.[0]?.id;
-
+    const status = data?.messages?.[0]?.message_status;
     if (msgId) {
-      console.log(
-        `✅ Template sent to ${toNormalized} (message_id: ${msgId})`
-      );
+      console.log(`✅ Template sent to ${toNormalized} (message_id: ${msgId}, status: ${status ?? 'accepted'})`);
     } else {
-      console.log(
-        `✅ Template sent to ${toNormalized}`
-      );
+      console.log(`✅ Template sent to ${toNormalized}`);
     }
   } else {
-    console.error(
-      '❌ WhatsApp template send failed:',
-      data
-    );
+    console.error('❌ WhatsApp template send failed:', JSON.stringify(data?.error || data, null, 2));
   }
 
-  return ok;
+  return ok && !data?.error;
 }
 
 

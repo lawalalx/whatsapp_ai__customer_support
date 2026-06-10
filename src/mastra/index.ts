@@ -75,6 +75,27 @@ const routes = [
         return c.json({ error: "Invalid mode. Must be one of: ai, manual, meta" }, 400);
       }
 
+      // For manual mode: validate survey exists before starting workflow
+      if (mode === 'manual') {
+        try {
+          const db = getDb();
+          if (db) {
+            const result = await db.query(
+              `SELECT id FROM surveys WHERE id = $1 AND mode = 'manual' AND is_archived = FALSE`,
+              [surveyId]
+            );
+            if (!result?.rows || result.rows.length === 0) {
+              return c.json({
+                error: 'survey_not_found',
+                message: `Manual survey '${surveyId}' does not exist or has been archived. Create it first via POST /admin/survey.`,
+              }, 404);
+            }
+          }
+        } catch (dbErr) {
+          console.error('Survey existence check failed:', dbErr);
+        }
+      }
+
       try {
 
         // For ai/manual, run the workflow
