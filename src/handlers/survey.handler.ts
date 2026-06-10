@@ -1,4 +1,4 @@
-﻿// handlers/survey.handler.ts
+// handlers/survey.handler.ts
 
 import { Pool } from "pg";
 import { saveSurveyResponse } from "../services/response.service.js";
@@ -40,7 +40,7 @@ function findNextVisibleQuestion(
     if (depAnswer === expected) return i; // condition met
     // else skip
   }
-  return questions.length; // all remaining questions skipped â†’ survey done
+  return questions.length; // all remaining questions skipped -> survey done
 }
 
 /**
@@ -109,7 +109,7 @@ export async function handleSurveyMessage({
   const rawAnswer = buttonReply?.title || listReply?.title || buttonReply?.id || listReply?.id || textBody;
   if (!rawAnswer) return;
 
-  // ðŸšª EXIT FLOW (allow user to type exit anytime)
+  // 🚪 EXIT FLOW (allow user to type exit anytime)
   const exitAnswer = String(textBody || '').trim().toLowerCase();
   if (['exit', 'quit', 'stop', 'end'].includes(exitAnswer)) {
     await completeSession(db, session.id)
@@ -179,14 +179,14 @@ export async function handleSurveyMessage({
     showIf: currentQuestion?.showIf,
   })
 
-    // VALIDATION (ONLY FOR BUTTON/LIST) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // VALIDATION (ONLY FOR BUTTON/LIST) ---------------------
   let responseTextToSave = rawAnswer;
   let responseIdToSave = message.id;
 
   // Treat a question with `options` but no explicit `type` as interactive
   const isInteractiveQuestion = (currentQuestion?.type === 'button' || currentQuestion?.type === 'list' || (currentQuestion?.options?.length && !currentQuestion?.type));
   if (isInteractiveQuestion && currentQuestion.options?.length) {
-    // Normalize available options (strip emoji/punctuation so "Likely ðŸŸ¢" matches "likely")
+    // Normalize available options (strip emoji/punctuation so "Likely 🟢" matches "likely")
     const normalizedOptions = currentQuestion.options.map((opt: string) => normalizeForMatch(opt));
 
     // If reply came as an id (we set ids when sending options), map it back to option text
@@ -217,7 +217,7 @@ export async function handleSurveyMessage({
     }
   }
 
-  // â”€â”€â”€ 2. SAVE RESPONSE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- 2. SAVE RESPONSE -----------------------------------------
   await saveSurveyResponse({
     db,
     session,
@@ -226,13 +226,13 @@ export async function handleSurveyMessage({
     responseId: responseIdToSave,
   })
 
-  // â”€â”€â”€ 3. BUILD ANSWERS MAP (for showIf evaluation) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- 3. BUILD ANSWERS MAP (for showIf evaluation) -------------
   const answers = await buildAnswersMap(db, session.id, questions, currentIndex, responseTextToSave);
 
-  // â”€â”€â”€ 4. FIND NEXT VISIBLE QUESTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- 4. FIND NEXT VISIBLE QUESTION ----------------------------
   const nextIndex = findNextVisibleQuestion(questions, currentIndex + 1, answers);
 
-  // â”€â”€â”€ 5. CHECK IF DONE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- 5. CHECK IF DONE -----------------------------------------
   if (nextIndex >= questions.length) {
     await completeSession(db, session.id)
 
@@ -252,7 +252,7 @@ export async function handleSurveyMessage({
     return
   }
 
-  // â”€â”€â”€ 6. UPDATE SESSION & SEND NEXT QUESTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- 6. UPDATE SESSION & SEND NEXT QUESTION -------------------
   await updateSessionProgress(db, session.id, nextIndex)
   session.current_question = nextIndex
 

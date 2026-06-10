@@ -1,4 +1,4 @@
-﻿/**
+/**
  * WhatsApp Flow JSON Builder for Survey Flows
  *
  * All questions live on ONE screen (QUESTIONS).
@@ -15,11 +15,11 @@
  *  - Server handler checks for `__submit__` to distinguish update vs. final save
  *
  * Supported question types:
- *   "list"     â†’ Dropdown      (best for 3-10 options)
- *   "button"   â†’ RadioButtons  (best for 2-5 options)
- *   "text"     â†’ TextInput
- *   "textarea" â†’ TextArea
- *   "date"     â†’ DatePicker
+ *   "list"     -> Dropdown      (best for 3-10 options)
+ *   "button"   -> RadioButtons  (best for 2-5 options)
+ *   "text"     -> TextInput
+ *   "textarea" -> TextArea
+ *   "date"     -> DatePicker
  */
 
 export type QuestionType = 'list' | 'button' | 'text' | 'textarea' | 'date';
@@ -59,10 +59,10 @@ interface FlowParams {
   thankYouText?: string;
 }
 
-// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Helpers ------------------------------------------------------------------
 
 function truncate(str: string, max: number): string {
-  return str.length > max ? str.substring(0, max - 1) + 'â€¦' : str;
+  return str.length > max ? str.substring(0, max - 1) + '...' : str;
 }
 
 export function sanitizeOptionId(s: string): string {
@@ -93,7 +93,7 @@ export function computeVisibilityData(
   return data;
 }
 
-// â”€â”€â”€ Main Builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Main Builder -------------------------------------------------------------
 
 export function buildSurveyFlowJson(params: FlowParams, _endpointUrl: string): any {
   const { name, description, questions, thankYouText } = params;
@@ -104,7 +104,7 @@ export function buildSurveyFlowJson(params: FlowParams, _endpointUrl: string): a
     : buildSimpleFlow(name, description, questions, thankYouText);
 }
 
-// â”€â”€â”€ Simple flow (no conditionals) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Simple flow (no conditionals) -------------------------------------------
 
 function buildSimpleFlow(
   name: string,
@@ -134,7 +134,7 @@ function buildSimpleFlow(
   };
 }
 
-// â”€â”€â”€ Dynamic flow (with conditionals via data_exchange visibility) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Dynamic flow (with conditionals via data_exchange visibility) ------------
 
 function buildDynamicFlow(
   name: string,
@@ -145,7 +145,7 @@ function buildDynamicFlow(
   const conditionalQuestions = questions.filter((q) => q.showIf);
   const parentIds = new Set(conditionalQuestions.map((q) => q.showIf!.dependsOn));
 
-  // Screen data block â€” visibility flags for every conditional question, all false initially
+  // Screen data block -- visibility flags for every conditional question, all false initially
   const screenData: Record<string, any> = {};
   for (const q of conditionalQuestions) {
     screenData[visibilityVar(q.id)] = {
@@ -195,7 +195,7 @@ function buildDynamicFlow(
   };
 }
 
-// â”€â”€â”€ Component builders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Component builders -------------------------------------------------------
 
 function buildComponent(q: FlowQuestion, isParent: boolean): any {
   const required = q.required !== false;
@@ -283,7 +283,7 @@ function buildSubmitFooter(questions: FlowQuestion[]): any {
   };
 }
 
-// â”€â”€â”€ Shared screen builders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Shared screen builders ---------------------------------------------------
 
 function buildIntroScreen(name: string, description: string | undefined, firstScreen: string): any {
   return {
@@ -328,7 +328,7 @@ function buildCompleteScreen(thankYouText: string | undefined): any {
   };
 }
 
-// â”€â”€â”€ Deprecated multi-screen helpers (kept for import compatibility) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Deprecated multi-screen helpers (kept for import compatibility) ----------
 /** @deprecated Use computeVisibilityData instead */
 export function nextScreenAfter(
   _questions: FlowQuestion[],
