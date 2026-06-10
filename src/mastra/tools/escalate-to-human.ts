@@ -226,7 +226,7 @@ export const deleteEscalationTool = createTool({
 
 
 export const getEscalatedTicketsByCustomerPhoneTool = createTool({
-  id: 'get-escalated-tickets-by-customer-phone',
+  id: 'get-all-escalated-tickets-by-customer-phone',
   description: 'Retrieve all escalation tickets for a customer phone number',
 
   inputSchema: z.object({
@@ -259,14 +259,16 @@ export const getEscalatedTicketsByCustomerPhoneTool = createTool({
         customer_phone,
         created_at
       FROM escalations
-      WHERE customer_phone = $1
+      WHERE handoff_phone = $1
         AND COALESCE(is_archived, FALSE) = FALSE
         AND ticket_status != 'completed'
       ORDER BY created_at DESC
     `;
 
 
-    console.log('\n\ngetEscalatedTicketsByCustomerPhoneTool initialized with input schema:')
+
+    console.log('\n\ngetEscalatedTicketsByCustomerPhoneTool initialized with input schema:', getEscalatedTicketsByCustomerPhoneTool.inputSchema);
+    console.log('Received input for getEscalatedTicketsByCustomerPhoneTool:', input);
 
 
     const mastraInstance =
@@ -281,7 +283,14 @@ export const getEscalatedTicketsByCustomerPhoneTool = createTool({
     // ---------- Mastra DB ----------
     if (storageDb && typeof storageDb.any === 'function') {
       try {
-        const rows = await storageDb.any(query, [customerPhone]);
+
+         const handoffPhone =
+          context?.agent?.threadId?.replace('thread_', '') ||
+          input.customerPhone;
+
+        const rows = await storageDb.any(query, [handoffPhone]);
+
+        console.log(`[Mastra DB] Retrieved ${rows.length} tickets for customer phone: ${handoffPhone}`);
 
         return {
           success: true,
@@ -308,7 +317,11 @@ export const getEscalatedTicketsByCustomerPhoneTool = createTool({
     try {
       client = await pool.connect();
 
-      const result = await client.query(query, [customerPhone]);
+      const handoffPhone =
+        context?.agent?.threadId?.replace('thread_', '') ||
+        input.customerPhone;
+
+      const result = await client.query(query, [handoffPhone]);
 
       return {
         success: true,

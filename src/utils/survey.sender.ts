@@ -12,7 +12,9 @@ export async function sendSurveyIntro({
   surveyIntroTemplateId?: string;
 }) {
   // This rich fallback card is shown when no template is configured or the template send fails
-  const introText = `📊 *Dear Valued Customer,*\n\nWelcome to the *FBNBank Customer Survey*.\n\nPlease help us fill out this quick survey. Your feedback is incredibly important to us and helps us improve our services for you! 🌟\n\n⏱️ *Time:* Less than 2 minutes\n🛑 _Type *EXIT* at any time to stop._`;
+ 
+  // const introText = `*Dear Valued Firstbanker,*\n\nWelcome to the *FBNBank Customer Survey*.\n\nPlease help us fill out this quick survey. Your feedback is incredibly important to us and helps us improve our services for you! 🌟\n\n⏱️ *Time:* Less than 2 minutes\n🛑 _Type *EXIT* at any time to stop._`;
+  const introText = `👤 *Dear Valued Firstbanker*\n\nPlease help us fill out this quick survey. Your feedback is incredibly important to us and helps us improve our services for you! 🌟\n\n⏱️ *Time:* Less than 2 minutes\n🛑 _Type *EXIT* at any time to stop._`;
 
   // Track intro as survey outbound so a typed "proceed" is routed to survey handler.
   setLastOutbound(to, 'survey_question');
@@ -51,7 +53,7 @@ export async function sendSurveyIntro({
     to,
     question: introText,
     options: [{ id: 'survey_intro_proceed', title: 'Proceed' }],
-    headerText: 'Survey',
+    headerText: 'Firstbank Survey',
     footerText: 'Click the button below to proceed',
     phoneNumberId,
   });

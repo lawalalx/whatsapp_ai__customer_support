@@ -76,7 +76,7 @@ const PORT =
 
 
 const URL =
-  process.env.LOCAL_URL?.replace(/\/$/, '') ||
+  process.env.REMOTE_URL?.replace(/\/$/, '') ||
   process.env.SERVER_URL?.replace(/\/$/, '');
 
 app.use(express.json());
@@ -2777,8 +2777,20 @@ app.post('/admin/survey', async (req: Request, res: Response) => {
   } catch (e) {
     console.error('Failed to create survey', e);
 
+    if (e instanceof Error) {
+      const pgError = e as any;
+
+      // PostgreSQL duplicate key error
+      if (pgError.code === '23505') {
+        return res.status(409).json({
+          error: 'duplicate_survey_id',
+          message: `Survey with id "${req.body.id}" already exists. Please choose a different id.`,
+        });
+      }
+    }
+
     return res.status(500).json({
-      error: 'failed',
+      error: e instanceof Error ? e.message : 'internal_server_error',
     });
   }
 });
