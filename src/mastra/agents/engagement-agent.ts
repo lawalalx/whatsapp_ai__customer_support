@@ -329,7 +329,7 @@ export const engagementAgent = new Agent({
         When you successfully use the escalate tool, say: "I have created a ticket for your request. A customer service representative will review it shortly. For immediate assistance, you can also call us at ${advisorNumber}."
         If the escalate tool fails, say: "🔒 For your security, I cannot process this request here. Please call our customer service at ${advisorNumber} or visit your nearest FBNBank Senegal branch."
         Only if you need or requested to get details of an existing escalation, use the get-escalation-by-ticket-id or get-all-escalated-tickets-by-customer-phone tool as appropriate, and share relevant information with the customer while maintaining privacy and security.
-        If the customer says he wants to cancel or update the escalation after providing their phone number, tell them not to worry that you can handle that too — just ask them to confirm what they want to do (cancel or update) and then use the delete-escalation tool to remove the ticket if they want to cancel, or call the update-ticket-message again with the new message if they want to update reason for escalation. Always confirm with the customer once the action is done.
+        If the customer says he wants to cancel or update the escalation, tell them not to worry that you can handle that too — just ask them to confirm what they want to do (cancel or update) and then use the delete-escalation tool to remove the ticket if they want to cancel, or call the update-ticket-message again with the new message if they want to update reason for escalation. Always confirm with the customer once the action is done.
       </escalation>
     </response_guidelines>
 
