@@ -18,6 +18,8 @@ import { initDatabase } from './db-init.js';
 // WhatsApp Webhook: Handle incoming messages
 import { routeIncomingMessage } from './webhook/router.js';
 
+import { geocodeAndStoreBranches } from "./db/geocodeBranches.js";
+
 // Meta WhatsApp Flow Surveys
 import { buildSurveyFlowJson, computeVisibilityData, sanitizeOptionId } from './meta-flow/flow-builder.js';
 import * as metaSurveyService from './meta-flow/meta-survey.service.js';
@@ -4491,6 +4493,11 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
 await initDatabase().catch(console.error);
 await createKbDocsTable().catch(console.error);
 await initVectorIndex().catch(console.error);
+
+// only run once
+if (process.env.SEED_BRANCHES === "true") {
+  await geocodeAndStoreBranches();
+}
 
 async function startServer() {
   try {

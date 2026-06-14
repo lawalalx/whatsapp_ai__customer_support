@@ -41,18 +41,19 @@ export const initDatabase = async () => {
     // --- ADD THIS BLOCK HERE ---
     console.log('🧹 Cleaning up old data and migration history...');
     
-    // await client.query(`
-    //   -- Drop tables in order of dependency
-    //   DROP TABLE IF EXISTS schema_migrations CASCADE; 
-    //   DROP TABLE IF EXISTS survey_responses CASCADE;
-    //   DROP TABLE IF EXISTS survey_sessions CASCADE;
-    //   DROP TABLE IF EXISTS surveys CASCADE;
-    //   DROP TABLE IF EXISTS meta_flow_responses CASCADE;
-    //   DROP TABLE IF EXISTS meta_flow_surveys CASCADE;
-    //   DROP TABLE IF EXISTS chat_history CASCADE;
-    //   DROP TABLE IF EXISTS escalation_messages CASCADE;
-    //   DROP TABLE IF EXISTS escalations CASCADE;
-    // `);
+    await client.query(`
+      -- Drop tables in order of dependency
+      DROP TABLE IF EXISTS schema_migrations CASCADE; 
+      DROP TABLE IF EXISTS survey_responses CASCADE;
+      DROP TABLE IF EXISTS survey_sessions CASCADE;
+      DROP TABLE IF EXISTS surveys CASCADE;
+      DROP TABLE IF EXISTS meta_flow_responses CASCADE;
+      DROP TABLE IF EXISTS meta_flow_surveys CASCADE;
+      DROP TABLE IF EXISTS chat_history CASCADE;
+      DROP TABLE IF EXISTS escalation_messages CASCADE;
+      DROP TABLE IF EXISTS escalations CASCADE;
+      DROP TABLE IF EXISTS branches CASCADE;
+    `);
 
     console.log('📦 Initializing database...');
 
@@ -72,6 +73,20 @@ export const initDatabase = async () => {
       CREATE TABLE IF NOT EXISTS schema_migrations (
         id TEXT PRIMARY KEY,
         applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS branches (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        address TEXT NOT NULL,
+        latitude DOUBLE PRECISION NOT NULL,
+        longitude DOUBLE PRECISION NOT NULL,
+        geocoded_address TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
       );
     `);
 
@@ -462,7 +477,8 @@ export const initDatabase = async () => {
   } catch (error) {
     console.error('❌ Database initialization failed:', error);
     process.exit(1);
-  } finally {
-    await pool.end();
-  }
+  } 
+  // finally {
+  //   await pool.end();
+  // }
 }

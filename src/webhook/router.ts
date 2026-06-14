@@ -267,12 +267,17 @@ export async function routeIncomingMessage({
     });
   }
 
-  if (message.text) {
+  if (message.text || message.type === 'location') {
     console.log('No survey session for', phone, 'Routing to chat handler.');
+
+    const chatText = message.type === 'location' 
+      ? `[User shared their location: Latitude ${message.location?.latitude}, Longitude ${message.location?.longitude}]`
+      : message.text?.body;
+
     return handleChatMessage({
       mastra,
       phone,
-      text: message.text.body,
+      text: chatText,
       contactName,
       messageId,
       phoneNumberId,
