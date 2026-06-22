@@ -37,6 +37,8 @@ import {
   sendWhatsAppMessage,
   markAsRead,
 } from "../whatsapp-client.js";
+import { knowledgeBaseTool } from "./tools/knowledge-base-tool.js";
+import { findNearestBranchTool } from "./tools/get-nearest-distance-tool.js";
 
 /* -------------------------------------------------------------------------- */
 /*                                CONFIG                                      */
@@ -242,6 +244,9 @@ export const mastra = new Mastra({
     sendWhatsAppSurveyTool,
     sendWhatsAppTemplateTool,
     escalateTool,
+    knowledgeBaseTool,
+    findNearestBranchTool,
+    
   },
   storage: pgStorage,
   logger: new PinoLogger({
