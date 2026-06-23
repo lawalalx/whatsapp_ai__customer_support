@@ -65,6 +65,8 @@ const app: Application = express();
 await warmUpEmbeddingModel().catch(console.error);
 
 
+
+
 const args = process.argv;
 
 const portIndex = args.indexOf("--port");
@@ -89,6 +91,7 @@ app.use((req, res, next) => {
   res.setHeader('ngrok-skip-browser-warning', 'true');
   next();
 });
+
 
 // Agent chat test route
 app.post('/api/agent/chat', async (req: Request, res: Response) => {
@@ -124,6 +127,63 @@ app.post('/api/agent/chat', async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: err?.message ?? 'Internal error' });
   }
 });
+
+app.post('/api/agent/reset', async (req: Request, res: Response) => {
+  try {
+    // 1. Grab Mastra's primary storage subsystem
+    const storage = mastra.getStorage();
+    if (!storage) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Mastra storage provider is not configured or initialized.' 
+      });
+    }
+
+    // 2. Access the dedicated 'memory' store domain (manages threads, messages, and observations)
+    const memoryStore = await storage.getStore('memory');
+    if (!memoryStore) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Memory store domain could not be retrieved.' 
+      });
+    }
+
+    // 3. Fetch all threads across all resources/agents (omitting the filter loads everything)
+    const result = await memoryStore.listThreads({
+      page: 0,
+      perPage: false, // Disables pagination limits to fetch every record
+    });
+
+    const threads = result?.threads || [];
+
+    // 4. Clean slate: Delete every thread sequentially
+    const deletedThreads: string[] = [];
+
+    for (const thread of threads) {
+
+      console.log(`[INFO] Deleting thread ID: ${thread.id}`);
+      deletedThreads.push(thread.id);
+
+      await memoryStore.deleteThread({ threadId: thread.id });
+    }
+
+    // 5. Log for auditing purposes
+    console.log(`[AUDIT] Global agent memory reset initiated. Cleared ${threads.length} conversation threads at ${new Date().toISOString()}`);
+
+    return res.json({
+      success: true,
+      message: `Successfully reset agent states. Cleared all ${threads.length} conversation threads across all agents.`,
+      deletedThreads,
+    });
+  } catch (err: any) {
+    console.error('❌ /api/agent/reset error:', err);
+    return res.status(500).json({ 
+      success: false, 
+      error: err?.message ?? 'Internal server error during memory cleanup' 
+    });
+  }
+});
+
 
 console.log('DB URL from Express Server', process.env.DATABASE_URL);
 
@@ -2383,6 +2443,67 @@ Supported message types:
     }
   },
 
+  // ─── Agent Memory Reset ──────────────────────────────────────────────────
+  '/api/agent/reset': {
+    post: {
+      summary: 'Global reset of all agent memory threads',
+      tags: ['Agent'],
+      description: `
+      Accesses Mastra's primary storage subsystem to clear the memory of all agents completely. 
+
+      This endpoint operates without any input body parameters. It sweeps the entire 'memory' store domain, pulls all active conversation threads, and hard-deletes them sequentially.
+
+      **Cascading effects:**
+      - Purges all historical text messages, observations, and system reflections.
+      - Sanitizes connected vector databases of orphaned context records to prevent long-term token pollution.
+      `,
+      responses: {
+        '200': {
+          description: 'Successfully cleared all conversation threads across all operational agents.',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean', example: true },
+                  message: { type: 'string', example: 'Successfully reset agent states. Cleared all 12 active conversation threads across all agents.' }
+                }
+              }
+            }
+          }
+        },
+        '404': {
+          description: 'Mastra storage layer or memory domain failed to initialize.',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean', example: false },
+                  error: { type: 'string', example: 'Mastra storage provider is not configured or initialized.' }
+                }
+              }
+            }
+          }
+        },
+        '500': {
+          description: 'Database exception or cascade deletion pipe error.',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean', example: false },
+                  error: { type: 'string', example: 'Internal server error during memory cleanup' }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+
   '/api/kb/upload': {
     post: {
       summary: 'Upload document(s) to knowledge base',
@@ -2594,6 +2715,7 @@ app.post('/webhook/whatsapp', async (req: Request, res: Response) => {
       sendMessage: async (to: string, msg: string) => {
         // mark last outbound as chat
         setLastOutbound(String(to), 'chat');
+
         await sendWhatsAppMessage({ to, message: msg, phoneNumberId });
 
         try {

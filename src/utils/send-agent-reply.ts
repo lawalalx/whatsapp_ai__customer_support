@@ -61,9 +61,12 @@ export async function sendAgentReply(phone: string, rawText: string, phoneNumber
   const to = normalizePhone(String(phone));
   const { text, options } = extractOptions(rawText);
 
+  //THE FIX: Convert AI markdown **bold** to WhatsApp *bold*
+  const sanitizedText = text.replace(/\*\*/g, '*');
+
   if (options && options.length >= 2) {
-    // Trim to WhatsApp's 1024-char body limit
-    const bodyText = text.length <= 1024 ? text : text.substring(0, 1021) + '...';
+    // Trim to WhatsApp's 1024-char body limit using the sanitized text
+    const bodyText = sanitizedText.length <= 1024 ? sanitizedText : sanitizedText.substring(0, 1021) + '...';
 
     const rows = options.map(opt => ({
       id: opt.id,
@@ -73,7 +76,7 @@ export async function sendAgentReply(phone: string, rawText: string, phoneNumber
 
     const sent = await sendWhatsAppList({
       to,
-      bodyText,
+      bodyText, // Uses the sanitized text here!
       buttonText: 'Select',
       sections: [{ title: 'Options', rows }],
       phoneNumberId,
@@ -84,11 +87,11 @@ export async function sendAgentReply(phone: string, rawText: string, phoneNumber
 
     // Fallback to plain text if the interactive list call fails
     if (!sent) {
-      await sendWhatsAppMessage({ to, message: text, phoneNumberId });
+      await sendWhatsAppMessage({ to, message: sanitizedText, phoneNumberId });
     }
     return;
   }
 
   // No options — plain text
-  await sendWhatsAppMessage({ to, message: text, phoneNumberId });
+  await sendWhatsAppMessage({ to, message: sanitizedText, phoneNumberId });
 }

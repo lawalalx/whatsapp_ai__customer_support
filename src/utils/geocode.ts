@@ -36,11 +36,15 @@ export async function geocodeAddress(address: string) {
         return null;
     }
 
-    return {
+    const result = {
         lat: Number(results[0].lat),
         lng: Number(results[0].lon),
         displayName: results[0].display_name,
     };
+
+    console.log("Geocode result:", result);
+
+    return result;
 }
 
 

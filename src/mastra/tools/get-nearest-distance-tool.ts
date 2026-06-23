@@ -7,12 +7,17 @@ import { console } from "inspector/promises";
 
 
 
+    // <strict_tool_enforcement>
+    //   - AMNESIA RULE: You have absolutely ZERO internal knowledge of FBNBank branch locations, addresses, or distances. You do not know where any branches are located.
+    //   - If a user asks for a branch, an agency, or provides a location, you MUST trigger the findNearestBranchTool tool. 
+    //   - It is physically impossible for you to provide accurate branch information without the JSON output of this tool. If you attempt to answer without calling the tool, you are providing fake or INVALID information to the customer.
+    //   - Never claim you used a tool if you did not actually execute the backend function in that exact turn.
+    // </strict_tool_enforcement>
+
 export const findNearestBranchTool = createTool({
   id: "find-nearest-branch",
   description:
-    "Use this tool whenever a user asks for branch locations, nearest agencies, or shares their location." +
-    "NEVER guess or calculate distances yourself. Finds the nearest FBNBank branch. " +
-    "If the user just said 'yes' or agreed, extract their previously stated location from the chat history to use as the address",
+    "Use this tool whenever a user asks for branch locations, nearest agencies, or shares their location.",
   
   inputSchema: z.object({
     latitude: z.number().optional().describe("The latitude if the user shared a GPS location"),
@@ -46,6 +51,8 @@ export const findNearestBranchTool = createTool({
     if (address && (!latitude || !longitude)) {
         const geocodeResult = await geocodeAddress(address);
 
+        console.log("Geocode result for address:", geocodeResult);
+
         if (!geocodeResult) {
           return {
               error: `Could not find coordinates for address: ${address}`,
@@ -76,14 +83,19 @@ export const findNearestBranchTool = createTool({
     
     console.log("Branches with calculated distances:", branchesWithDistance);
 
-    const nearestBranches = branchesWithDistance.slice(0, 3);
+    const nearestBranches = branchesWithDistance[0] ? [branchesWithDistance[0]] : [];
 
-    return {
+    const result = {
         nearestBranch: nearestBranches,
         searchedLocation: {
             latitude: searchLat,
             longitude: searchLng,
         },
     };
+
+
+    console.log("Nearest branches:", result);
+
+    return result;
   },
 });
