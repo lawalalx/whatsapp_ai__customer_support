@@ -2,6 +2,17 @@
 import type { Pool } from 'pg';
 
 export async function getActiveSurveySession(db: Pool, phone: string) {
+  // Auto-expire sessions whose expires_at has passed (non-fatal if column not yet added)
+  await db.query(
+    `UPDATE survey_sessions
+     SET status = 'expired', updated_at = NOW()
+     WHERE customer_phone = $1
+       AND status = 'active'
+       AND expires_at IS NOT NULL
+       AND expires_at < NOW()`,
+    [phone]
+  ).catch(() => {});
+
   const result = await db.query(
     `SELECT * FROM survey_sessions
      WHERE customer_phone = $1
@@ -12,8 +23,8 @@ export async function getActiveSurveySession(db: Pool, phone: string) {
   );
 
   console.log(`\n\nChecked active session for phone ${phone}. Found: ${result.rows.length > 0}`);
-  console.log("LOOKUP PHONE:", phone);
-  console.log("SESSION RESULT:", result.rows);
+  console.log('LOOKUP PHONE:', phone);
+  console.log('SESSION RESULT:', result.rows);
   return result.rows[0];
 }
 
@@ -28,9 +39,24 @@ export async function updateSessionProgress(db: Pool, sessionId: string, nextInd
   return result;
 }
 
+/** Persists multi-select toggle state into questions_data JSONB for a specific question index. */
+export async function updateSessionMultiSelections(db: Pool, sessionId: string, questionIndex: number, selections: string[]) {
+  // Use jsonb_set to update the multiSelections array for the question at questionIndex
+  await db.query(
+    `UPDATE survey_sessions
+     SET questions_data = jsonb_set(
+       questions_data,
+       ('{' || $1::text || ',multiSelections}')::text[],
+       $2::jsonb,
+       true
+     ),
+     updated_at = NOW()
+     WHERE id = $3`,
+    [questionIndex, JSON.stringify(selections), sessionId]
+  );
+}
 
 export async function completeSession(db: Pool, sessionId: string) {
-  // Mark the given session as completed
   const result = await db.query(
     `UPDATE survey_sessions
      SET status = 'completed', updated_at = NOW()
@@ -38,10 +64,6 @@ export async function completeSession(db: Pool, sessionId: string) {
     [sessionId]
   );
   console.log(`\n\nSession ${sessionId} marked as completed.`);
-
-  // Also defensively mark any other active sessions for the same phone
-  // as completed to avoid multiple active sessions for one customer_phone
-  // (this is a pragmatic safeguard for edge cases / previous bugs).
   try {
     await db.query(
       `UPDATE survey_sessions
@@ -57,6 +79,5 @@ export async function completeSession(db: Pool, sessionId: string) {
   } catch (e) {
     console.warn('Failed to cleanup other active sessions for', sessionId, e);
   }
-
   return result;
 }

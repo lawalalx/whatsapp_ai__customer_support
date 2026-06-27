@@ -24,6 +24,7 @@ import {
 import {
    sendWhatsAppTemplateTool,
 } from "./tools/send-whatsapp-template-tool.js"
+import { sendFeedbackSurveyTool } from "./tools/send-feedback-survey-tool.js";
 
 // Meta Flow APIs
 import {
@@ -64,17 +65,22 @@ const routes = [
     method: "POST",
     handler: async (c) => {
       const body = await c.req.json().catch(() => null);
+      
+
+      if (body?.mode === 'manual' && !body?.surveyId) {
+        return c.json({ error: "Woops! You have to provide a surveyId for manual mode" }, 400);
+      }
 
       // Required fields
-      if (!body?.to || !body?.surveyId || !body?.topic || !body?.mode) {
-        return c.json({ error: "Missing required fields (to, surveyId, topic, mode)" }, 400);
+      if (!body?.to || !body?.topic || !body?.mode) {
+        return c.json({ error: "Missing required fields (to, topic, mode)" }, 400);
       }
 
       const { to, surveyId, topic, mode, context, surveyIntroTemplateId } = body;
 
       // Only allow valid modes
-      if (!['ai', 'manual', 'meta'].includes(mode)) {
-        return c.json({ error: "Invalid mode. Must be one of: ai, manual, meta" }, 400);
+      if (!['ai', 'manual'].includes(mode)) {
+        return c.json({ error: "Invalid mode. Must be one of: ai, manual" }, 400);
       }
 
       // For manual mode: validate survey exists before starting workflow
@@ -97,6 +103,29 @@ const routes = [
           console.error('Survey existence check failed:', dbErr);
         }
       }
+
+      // For AI mode: do not allow reusing an existing survey ID.
+      // This prevents collisions with manual surveys and keeps survey IDs unique.
+      if (mode === 'ai' && surveyId) {
+        try {
+          const db = getDb();
+          if (db) {
+            const result = await db.query(
+              `SELECT id, mode FROM surveys WHERE id = $1 LIMIT 1`,
+              [surveyId]
+            );
+            if (result?.rows && result.rows.length > 0) {
+              return c.json({
+                error: 'duplicate_survey_id',
+                message: `Survey ID '${surveyId}' already exists. Please use a new surveyId for the AI survey.`,
+              }, 409);
+            }
+          }
+        } catch (dbErr) {
+          console.error('AI survey duplicate ID check failed:', dbErr);
+        }
+      }
+
 
       try {
 
@@ -243,6 +272,7 @@ export const mastra = new Mastra({
     sendWhatsAppMessageTool,
     sendWhatsAppSurveyTool,
     sendWhatsAppTemplateTool,
+    sendFeedbackSurveyTool,
     escalateTool,
     knowledgeBaseTool,
     findNearestBranchTool,

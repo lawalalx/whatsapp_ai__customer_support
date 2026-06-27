@@ -19,6 +19,8 @@ export interface SaveSurveyResponseParams {
       survey_id: string;
       questions_data: Array<{
         question: string;
+        allowMultiple?: boolean;
+        multiSelections?: string[];
       }>;
     };
     phone: string;
@@ -28,12 +30,16 @@ export interface SaveSurveyResponseParams {
 
 
 export interface SurveyQuestion {
-  type?: 'button' | 'list' | 'text';
+  type?: 'button' | 'list' | 'text' | 'multi';
   text?: string;
   question: string;
   options?: string[];
   sectionTitle?: string;
   placeholder?: string;
+  /** If true, user can select multiple options (multi-select / checkbox style) */
+  allowMultiple?: boolean;
+  /** Accumulated selections for multi-select questions (stored in session) */
+  multiSelections?: string[];
 }
 
 

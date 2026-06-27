@@ -51,6 +51,7 @@ async function loadManualSurveyQuestions(surveyId?: string, mode?:  'manual' | '
     sectionTitle: q.sectionTitle,
     placeholder: q.placeholder,
     showIf: q.showIf,
+    allowMultiple: q.allowMultiple,
   }));
 }
 
@@ -62,17 +63,19 @@ const generateSurveyContent = createStep({
     surveyId: z.string().optional(),
     context: z.string().optional(),
     mode: z.enum(['ai', 'manual']).optional(),
+    expiryHours: z.number().int().positive().optional(),
   }),
   outputSchema: z.object({
     questions: z.array(z.object({
       id: z.string().optional(),
       question: z.string(),
       options: z.array(z.string()),
-      type: z.enum(['button', 'list', 'text']).optional(),
+      type: z.enum(['button', 'list', 'text', 'multi']).optional(),
       text: z.string().optional(),
       sectionTitle: z.string().optional(),
       placeholder: z.string().optional(),
       showIf: z.object({ dependsOn: z.string(), equals: z.string() }).optional(),
+      allowMultiple: z.boolean().optional(),
     })),
   }),
   execute: async ({ inputData, mastra }) => {
@@ -80,9 +83,11 @@ const generateSurveyContent = createStep({
     if (inputData.mode === 'manual') {
       const manualQuestions = await loadManualSurveyQuestions(inputData.surveyId, inputData.mode);
       if (manualQuestions) {
+        console.log(`Manual Questions is ${JSON.stringify(manualQuestions)}`);
+        console.log(`Using manual survey template for ${inputData.surveyId}`);
         return { questions: manualQuestions }
       } else {
-        console.error('Manual mode: survey template not found')
+        throw new Error(`survey does not exist: ${inputData.surveyId}`)
       }
     }
 
@@ -96,7 +101,7 @@ const generateSurveyContent = createStep({
     }
 
     // Try multi-question format first
-    let response;
+    let response: any;
     try {
       response = await agent.generate(
         [{ role: 'user', content: prompt }],
@@ -104,11 +109,19 @@ const generateSurveyContent = createStep({
           structuredOutput: {
             schema: z.object({
               questions: z.array(z.object({
+                id: z.string(),
                 question: z.string(),
                 options: z.array(z.string()),
+                type: z.enum(['button', 'list', 'multi', 'text']).optional(),
+                showIf: z.object({ dependsOn: z.string(), equals: z.string() }).optional(),
+                allowMultiple: z.boolean().optional(),
               })).optional(),
+              id: z.string(),
               question: z.string().optional(),
               options: z.array(z.string()).optional(),
+              type: z.enum(['button', 'list', 'multi', 'text']).optional(),
+              showIf: z.object({ dependsOn: z.string(), equals: z.string() }).optional(),
+              allowMultiple: z.boolean().optional(),
             }),
           },
           memory: {
@@ -116,17 +129,16 @@ const generateSurveyContent = createStep({
             resource: `survey_${inputData.surveyId || 'default'}`,
           },
         }
-      )
+      );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const isTransientConnectionError = /ECONNRESET|Cannot connect to API/i.test(message);
-      if (isTransientConnectionError) {
-        const manualQuestions = await loadManualSurveyQuestions(inputData.surveyId, inputData.mode);
+      if (inputData.surveyId) {
+        const manualQuestions = await loadManualSurveyQuestions(inputData.surveyId, 'manual');
         if (manualQuestions) {
           console.warn(`AI survey generation failed for ${inputData.surveyId}; falling back to local template.`, error);
           return { questions: manualQuestions };
         }
       }
+
       throw error;
     }
 
@@ -135,9 +147,28 @@ const generateSurveyContent = createStep({
     // Normalize: handle both single-question and multi-question responses
     const obj = response.object
     if (obj.questions && obj.questions.length > 0) {
+
+      obj.questions = obj.questions.map((q: any, index: number) => {
+        // 1. Force standard IDs to ensure perfect sequence
+        q.id = `q${index + 1}`; 
+
+        // 2. Eradicate impossible self-dependencies or q1 dependencies
+        if (q.id === 'q1' || (q.showIf && q.showIf.dependsOn === q.id)) {
+          delete q.showIf;
+        }
+
+        // 3. Strictly enforce allowMultiple rules
+        if (q.type === 'multi') {
+          q.allowMultiple = true;
+        } else {
+          delete q.allowMultiple; 
+        }
+
+        return q;
+      });
+
       const surveyId =
-        inputData.surveyId ??
-        `ai-survey-${Date.now()}`;
+        inputData.surveyId || `ai-survey-${Date.now()}`;
 
       const storage = mastra.getStorage() as any;
       const db = storage?.db;
@@ -167,6 +198,7 @@ const generateSurveyContent = createStep({
       };
 
     } else if (obj.question && obj.options) {
+      console.log(`\n\n✅ Generated single-question survey: ${obj.question} with options: ${obj.options}`);
       return { questions: [{ question: obj.question, options: obj.options }] }
     }
 
@@ -182,15 +214,17 @@ const sendSurveyQuestions = createStep({
     to: z.string(),
     surveyId: z.string(),
     surveyIntroTemplateId: z.string().optional(),
+    expiryHours: z.number().int().positive().optional(),
     questions: z.array(z.object({
       id: z.string().optional(),
       question: z.string(),
       options: z.array(z.string()),
-      type: z.enum(['button', 'list', 'text']).optional(),
+      type: z.enum(['button', 'list', 'text', 'multi']).optional(),
       text: z.string().optional(),
       sectionTitle: z.string().optional(),
       placeholder: z.string().optional(),
       showIf: z.object({ dependsOn: z.string(), equals: z.string() }).optional(),
+      allowMultiple: z.boolean().optional(),
     })),
   }),
   outputSchema: z.object({
@@ -201,6 +235,9 @@ const sendSurveyQuestions = createStep({
   execute: async ({ inputData, mastra }) => {
     const { to, surveyId, questions, surveyIntroTemplateId } = inputData
     const surveySessionId = `${surveyId}_${Date.now()}`
+    const expiresAt = typeof inputData.expiryHours === 'number'
+      ? new Date(Date.now() + inputData.expiryHours * 60 * 60 * 1000).toISOString()
+      : null;
 
     // Store survey session in Postgres for response tracking
     const storage = mastra?.getStorage()
@@ -220,10 +257,11 @@ const sendSurveyQuestions = createStep({
                 total_questions,
                 questions_data,
                 status,
+                expires_at,
                 created_at,
                 updated_at
               )
-              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
               [
                 surveySessionId,
                 surveyId,
@@ -232,6 +270,7 @@ const sendSurveyQuestions = createStep({
                 questions.length,
                 JSON.stringify(questions),
                 'active',
+                expiresAt,
                 new Date().toISOString(),
                 new Date().toISOString(),
               ]
@@ -274,6 +313,7 @@ export const surveyWorkflow = createWorkflow({
     context: z.string().optional(),
     surveyIntroTemplateId: z.string().optional(),
     mode: z.enum(['ai', 'manual']).optional(),
+    expiryHours: z.number().int().positive().optional(),
   }),
   outputSchema: z.object({
     success: z.boolean(),
@@ -291,11 +331,12 @@ export const surveyWorkflow = createWorkflow({
       id?: string;
       question: string;
       options: string[];
-      type?: 'button' | 'list' | 'text';
+      type?: 'button' | 'list' | 'text' | 'multi';
       text?: string;
       sectionTitle?: string;
       placeholder?: string;
       showIf?: { dependsOn: string; equals: string };
+      allowMultiple?: boolean;
     }>;
   }> => {
     const initData = getInitData<typeof surveyWorkflow>()

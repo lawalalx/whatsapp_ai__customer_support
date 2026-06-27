@@ -16,6 +16,10 @@ const isWhatsAppMessageId = (messageId: string | undefined): boolean => {
 const getConfig = (context?: WhatsAppRequestContext) => {
   const apiVersion = process.env.WHATSAPP_API_VERSION || 'v22.0';
   const phoneNumberId = context?.phoneNumberId || process.env.WHATSAPP_BUSINESS_PHONE_NUMBER_ID;
+  
+  console.log('getConfig called with context:', context);
+
+  
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
   if (!phoneNumberId || !accessToken) {
     throw new Error('Missing WHATSAPP_BUSINESS_PHONE_NUMBER_ID or WHATSAPP_ACCESS_TOKEN');
@@ -350,7 +354,6 @@ export async function sendWhatsAppTyping({ to, messageId, phoneNumberId }: { to:
 }
 
 // ─── 2. Interactive button survey (max 3 buttons) ────────────────────────────
-
 export async function sendWhatsAppSurvey({
   to,
   question,

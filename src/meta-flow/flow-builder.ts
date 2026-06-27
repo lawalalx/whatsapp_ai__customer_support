@@ -17,12 +17,13 @@
  * Supported question types:
  *   "list"     -> Dropdown      (best for 3-10 options)
  *   "button"   -> RadioButtons  (best for 2-5 options)
+ *   "multi"    -> CheckboxGroup (best for multi-select, 2+ options)
  *   "text"     -> TextInput
  *   "textarea" -> TextArea
  *   "date"     -> DatePicker
  */
 
-export type QuestionType = 'list' | 'button' | 'text' | 'textarea' | 'date';
+export type QuestionType = 'list' | 'button' | 'multi' | 'text' | 'textarea' | 'date';
 
 export interface FlowCondition {
   /** The question ID whose answer controls visibility of this question */
@@ -40,6 +41,8 @@ export interface FlowQuestion {
   placeholder?: string;
   sectionTitle?: string;
   showIf?: FlowCondition;
+  /** If true, user can select multiple options (multi-select / checkbox style) */
+  allowMultiple?: boolean;
 }
 
 export interface MetaFlowQuestion extends FlowQuestion {}
@@ -232,6 +235,26 @@ function buildComponent(q: FlowQuestion, isParent: boolean): any {
           title: truncate(opt, 30),
         })),
       };
+      if (isParent) {
+        comp['on-select-action'] = {
+          name: 'data_exchange',
+          payload: { [q.id]: `\${form.${q.id}}` },
+        };
+      }
+      return comp;
+    }
+    case 'multi': {
+      const comp: any = {
+        type: 'CheckboxGroup',
+        label: truncate(q.sectionTitle || q.text, 30),
+        name: q.id,
+        required: false, // multi-select is never required (user can skip)
+        'data-source': (q.options || []).map((opt) => ({
+          id: sanitizeOptionId(opt),
+          title: truncate(opt, 30),
+        })),
+      };
+      // If this multi-select is a parent for conditional questions, trigger data_exchange on any change
       if (isParent) {
         comp['on-select-action'] = {
           name: 'data_exchange',

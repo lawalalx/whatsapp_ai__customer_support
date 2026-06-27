@@ -1,7 +1,7 @@
 // surveyTemplates.ts
 // Demo survey templates for WhatsApp simulation
 
-export type SurveyQuestionType = 'button' | 'list' | 'text';
+export type SurveyQuestionType = 'button' | 'list' | 'text' | 'multi';
 
 export interface SurveyTemplate {
   id: string;
@@ -13,6 +13,7 @@ export interface SurveyTemplate {
     type: SurveyQuestionType;
     sectionTitle?: string; // for list sections
     placeholder?: string; // for text input
+    allowMultiple?: boolean; // for multi-select questions
   }>;
 }
 
@@ -59,6 +60,35 @@ export const surveyTemplates: SurveyTemplate[] = [
         text: 'Would you like to be contacted for follow-up?',
         options: ['Yes', 'No'],
         type: 'button',
+      },
+    ],
+  },
+  {
+    id: 'demo_multi_select',
+    name: 'Multi-Select Feedback Survey',
+    questions: [
+      {
+        id: 'ms_q1',
+        text: 'Which of our services do you use? (Select all that apply)',
+        options: ['Mobile Banking', 'Internet Banking', 'ATM Services', 'Branch Banking', 'USSD Banking'],
+        type: 'multi',
+        sectionTitle: 'Services Used',
+        allowMultiple: true,
+      },
+      {
+        id: 'ms_q2',
+        text: 'What features matter most to you? (Select all that apply)',
+        options: ['Security', 'Speed', 'Customer Support', 'Low Fees', 'User Experience'],
+        type: 'multi',
+        sectionTitle: 'Features',
+        allowMultiple: true,
+      },
+      {
+        id: 'ms_q3',
+        text: 'How would you rate your overall experience?',
+        options: ['Excellent', 'Good', 'Average', 'Poor'],
+        type: 'list',
+        sectionTitle: 'Overall',
       },
     ],
   },

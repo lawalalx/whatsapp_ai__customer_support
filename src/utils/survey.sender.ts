@@ -19,7 +19,7 @@ export async function sendSurveyIntro({
   // Track intro as survey outbound so a typed "proceed" is routed to survey handler.
   setLastOutbound(to, 'survey_question');
 
-  const proactiveTemplate = surveyIntroTemplateId || process.env.WHATSAPP_PROACTIVE_TEMPLATE;
+  const proactiveTemplate = surveyIntroTemplateId;
 
   if (proactiveTemplate) {
     console.log('Attempting proactive template for survey intro:', proactiveTemplate);
@@ -61,7 +61,6 @@ export async function sendSurveyIntro({
 
 
 
-
 export async function sendSurveyQuestion({
   to,
   session,
@@ -87,6 +86,67 @@ export async function sendSurveyQuestion({
   const opts = question.options ?? [];
   const hasOptions = Array.isArray(opts) && opts.length > 0;
 
+  // ─── MULTI-SELECT (allowMultiple) ─────────────────────────────────────────
+  if (hasOptions && (question.type === 'multi' || question.allowMultiple)) {
+    const selected = question.multiSelections ?? [];
+    const pendingSelected = selected.filter(s => opts.includes(s));
+
+    // Build the question text showing current selections
+    let displayText = qText;
+    if (pendingSelected.length > 0) {
+      displayText += `\n\n✅ *Selected:* ${pendingSelected.join(', ')}`;
+    }
+    displayText += `\n\n*Tap each option to toggle it on/off.*\nWhen done, tap _Done ✅_ to continue.`;
+
+    // Build buttons: each option + Done
+    const buttons = opts.map((opt, i) => ({
+      id: `${session.id}_q${index + 1}_multi_opt${i + 1}`,
+      title: opt.length > 20 ? opt.substring(0, 17) + '...' : opt,
+    }));
+
+    // WhatsApp only allows up to 3 buttons. If more than 2 options (+ Done = 3), use list instead.
+    if (opts.length <= 2) {
+      // Use buttons: toggles + Done
+      const allButtons = [
+        ...buttons,
+        { id: `${session.id}_q${index + 1}_done`, title: 'Done ✅' },
+      ];
+      setLastOutbound(to, 'survey_question');
+      return sendWhatsAppSurvey({
+        to,
+        question: displayText,
+        options: allButtons,
+        headerText,
+        footerText,
+        phoneNumberId,
+      });
+    } else {
+      // Use list for many options: each option as a row + a "Done" row
+      setLastOutbound(to, 'survey_question');
+      return sendWhatsAppList({
+        to,
+        headerText,
+        bodyText: displayText,
+        footerText,
+        buttonText: 'Select',
+        phoneNumberId,
+        sections: [
+          {
+            title: question.sectionTitle || 'Options',
+            rows: [
+              ...opts.map((opt, i) => ({
+                id: `${session.id}_q${index + 1}_multi_opt${i + 1}`,
+                title: opt.length > 24 ? opt.substring(0, 21) + '...' : opt,
+              })),
+              { id: `${session.id}_q${index + 1}_done`, title: 'Done ✅' },
+            ],
+          },
+        ],
+      });
+    }
+  }
+
+  // ─── BUTTON / LIST / TEXT (existing logic) ────────────────────────────────
   if (hasOptions) {
     const useButtons = question.type === 'button' || (question.type === undefined && opts.length <= 2);
     const useList = question.type === 'list' || (question.type === undefined && opts.length > 2);

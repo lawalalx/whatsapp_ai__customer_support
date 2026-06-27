@@ -1,10 +1,11 @@
-// handlers/survey.handler.ts
+﻿// handlers/survey.handler.ts
 
 import { Pool } from "pg";
 import { saveSurveyResponse } from "../services/response.service.js";
-import { completeSession, updateSessionProgress } from "../services/session.service.js";
+import { completeSession, updateSessionProgress, updateSessionMultiSelections } from "../services/session.service.js";
 import { getSurveyResponsesBySession } from "../services/response.service.js";
 
+const multiSelectionCache = new Map<string, Record<number, string[]>>();
 
 type HandleSurveyMessageParams = {
   db: Pool;
@@ -12,41 +13,21 @@ type HandleSurveyMessageParams = {
   session: any;
   phone: string;
   contactName?: string | null;
-
   sendMessage: (to: string, msg: string) => Promise<void>;
-
-  sendQuestion: (
-    to: string,
-    question: any,
-    session: any
-  ) => Promise<void>;
+  sendQuestion: (to: string, question: any, session: any) => Promise<void>;
 };
 
-/**
- * Find the next question index to send, starting from `fromIndex`,
- * skipping any whose `showIf` condition isn't met by current answers.
- * Returns `questions.length` when no more questions remain.
- */
-function findNextVisibleQuestion(
-  questions: any[],
-  fromIndex: number,
-  answers: Record<string, string>,
-): number {
+function findNextVisibleQuestion(questions: any[], fromIndex: number, answers: Record<string, string>): number {
   for (let i = fromIndex; i < questions.length; i++) {
     const q = questions[i];
-    if (!q.showIf) return i; // always visible
-    const depAnswer = (answers[q.showIf.dependsOn] ?? '').toLowerCase().trim();
-    const expected = (q.showIf.equals ?? '').toLowerCase().trim();
-    if (depAnswer === expected) return i; // condition met
-    // else skip
+    if (!q.showIf) return i;
+    const depAnswer = String(answers[q.showIf.dependsOn] ?? '').toLowerCase().trim();
+    const expected = String(q.showIf.equals ?? '').toLowerCase().trim();
+    if (depAnswer === expected) return i;
   }
-  return questions.length; // all remaining questions skipped -> survey done
+  return questions.length;
 }
 
-/**
- * Build an answers map { questionId: responseText } from previously saved responses.
- * Uses the question's semantic `id` field if available, falling back to positional index.
- */
 async function buildAnswersMap(
   db: Pool,
   sessionId: string,
@@ -55,29 +36,24 @@ async function buildAnswersMap(
   currentAnswer: string,
 ): Promise<Record<string, string>> {
   const answers: Record<string, string> = {};
-
   try {
     const saved = await getSurveyResponsesBySession(db, sessionId);
     for (const resp of saved) {
-      // question_id format: {sessionId}_q{n}
-      const match = resp.question_id?.match(/_q(\d+)$/);
+      const match = String(resp.question_id || '').match(/_q(\d+)$/);
       if (match) {
         const qIdx = parseInt(match[1], 10) - 1;
         const q = questions[qIdx];
         if (q?.id) answers[q.id] = resp.response_text;
       }
     }
-  } catch {}
-
-  // Include current answer (just saved to DB, may not appear in above query yet)
-  const currentQ = questions[currentIndex];
-  if (currentQ?.id) {
-    answers[currentQ.id] = currentAnswer;
+  } catch {
+    // ignore
   }
 
+  const currentQ = questions[currentIndex];
+  if (currentQ?.id) answers[currentQ.id] = currentAnswer;
   return answers;
 }
-
 
 export async function handleSurveyMessage({
   db,
@@ -88,111 +64,195 @@ export async function handleSurveyMessage({
   sendMessage,
   sendQuestion,
 }: HandleSurveyMessageParams) {
-  // Helper: normalize text for matching (lowercase, remove emojis/punctuation)
+  void contactName;
+
+  // Expiry check
+  if (session.expires_at) {
+    const expiresAt = new Date(session.expires_at);
+    if (Date.now() > expiresAt.getTime()) {
+      try {
+        await db.query(`UPDATE survey_sessions SET status = 'expired', updated_at = NOW() WHERE id = $1`, [session.id]);
+      } catch {
+        // ignore
+      }
+      await sendMessage(phone, 'This survey has ended.');
+      return;
+    }
+  }
+
   const normalizeForMatch = (s: any) => {
     try {
       return String(s || '')
         .toLowerCase()
         .normalize('NFKD')
-        // remove anything that's not a letter, number or whitespace (removes emoji/punctuation)
-        .replace(/[^^\p{L}\p{N}\s]/gu, '')
+        .replace(/[^\p{L}\p{N}\s]/gu, '')
         .replace(/\s+/g, ' ')
         .trim();
-    } catch (e) {
+    } catch {
       return String(s || '').toLowerCase().trim();
     }
-  }
+  };
+
   const buttonReply = message?.interactive?.button_reply;
   const listReply = message?.interactive?.list_reply;
   const textBody = typeof message?.text?.body === 'string' ? message.text.body : '';
-
   const rawAnswer = buttonReply?.title || listReply?.title || buttonReply?.id || listReply?.id || textBody;
+
   if (!rawAnswer) return;
 
-  // 🚪 EXIT FLOW (allow user to type exit anytime)
-  const exitAnswer = String(textBody || '').trim().toLowerCase();
-  if (['exit', 'quit', 'stop', 'end'].includes(exitAnswer)) {
-    await completeSession(db, session.id)
-
-    await sendMessage(
-      phone,
-      "You have exited the survey. Your responses have been saved."
-    )
-    return
-  }
-
-  const currentIndex = session.current_question
-  if (currentIndex === -1) {
-    const proceedPressed = normalizeForMatch(rawAnswer) === 'proceed' || normalizeForMatch(buttonReply?.title || listReply?.title) === 'proceed';
-    if (!proceedPressed) {
-      await sendMessage(phone, 'Please tap Proceed to start the survey.')
-      return
-    }
-
-    let questions = session.questions_data
-    if (typeof questions === 'string') {
-      try {
-        questions = JSON.parse(questions)
-      } catch (e) {
-        // keep original; downstream checks will handle invalid shape
-      }
-    }
-
-    // Find the first visible question (no showIf conditions can block Q0 in practice,
-    // but be safe)
-    const firstIndex = findNextVisibleQuestion(Array.isArray(questions) ? questions : [], 0, {});
-    if (!Array.isArray(questions) || firstIndex >= questions.length) {
-      await completeSession(db, session.id)
-      await sendMessage(phone, 'Thanks! Survey completed.')
-      return
-    }
-
-    await updateSessionProgress(db, session.id, firstIndex)
-    session.current_question = firstIndex
-    await sendQuestion(phone, questions[firstIndex], session)
-    return
-  }
-
-  // Normalize questions_data (DB may return JSON string or JSONB)
-  let questions = session.questions_data
-  if (typeof questions === 'string') {
+  const questions: any[] = (() => {
     try {
-      questions = JSON.parse(questions)
-    } catch (e) {
-      // keep original; downstream checks will handle invalid shape
+      if (typeof session.questions_data === 'string') return JSON.parse(session.questions_data);
+      return Array.isArray(session.questions_data) ? session.questions_data : [];
+    } catch {
+      return [];
     }
+  })();
+
+  if (normalizeForMatch(rawAnswer) === 'exit') {
+    await completeSession(db, session.id);
+    await sendMessage(phone, 'You have exited the survey. Thank you! 👋');
+    return;
   }
-  const currentQuestion = Array.isArray(questions) ? questions[currentIndex] : undefined
 
-  console.log(
-    `Answer received for Q${currentIndex + 1}:`,
-    rawAnswer,
-    { buttonReply, listReply, textBody }
-  )
+  const currentIndex = typeof session.current_question === 'number' && session.current_question >= 0 ? session.current_question : 0;
 
-  // Debugging: show current question shape so we can trace validation issues
-  console.log('currentQuestion debug:', {
-    index: currentIndex,
-    type: currentQuestion?.type,
-    question: currentQuestion?.question,
-    options: currentQuestion?.options,
-    showIf: currentQuestion?.showIf,
-  })
+  // Intro proceed flow
+  if (session.current_question === -1) {
+    const isProceed = (buttonReply?.id || listReply?.id || '').includes('survey_intro_proceed') || normalizeForMatch(rawAnswer) === 'proceed';
+    if (!isProceed) {
+      await sendMessage(phone, 'Click *Proceed* to start the survey, or type *EXIT* to stop.');
+      return;
+    }
 
-    // VALIDATION (ONLY FOR BUTTON/LIST) ---------------------
+    const firstIdx = findNextVisibleQuestion(questions, 0, {});
+    if (firstIdx >= questions.length) {
+      await completeSession(db, session.id);
+      await sendMessage(phone, 'Thanks! Survey completed. ✅');
+      return;
+    }
+
+    await updateSessionProgress(db, session.id, firstIdx);
+    session.current_question = firstIdx;
+    return sendQuestion(phone, questions[firstIdx], session);
+  }
+
+  if (currentIndex >= questions.length) {
+    await completeSession(db, session.id);
+    await sendMessage(phone, 'Thanks! Survey completed. ✅');
+    return;
+  }
+
+  const currentQuestion = questions[currentIndex];
+  const isMultiSelect = currentQuestion?.type === 'multi' || currentQuestion?.allowMultiple === true;
+
+  if (isMultiSelect) {
+    const replyId: string = buttonReply?.id || listReply?.id || '';
+    const isDoneReply = replyId.includes('_done') || normalizeForMatch(rawAnswer) === 'done';
+
+    let multiSelections: string[] = [];
+    try {
+      const raw = session.questions_data?.[currentIndex]?.multiSelections;
+      if (Array.isArray(raw)) multiSelections = raw;
+    } catch {
+      // ignore
+    }
+
+    const cacheKey = session.id;
+    const cachedForSession = multiSelectionCache.get(cacheKey) || {};
+    const cachedSelections = cachedForSession[currentIndex];
+    if (Array.isArray(cachedSelections) && cachedSelections.length > 0 && multiSelections.length === 0) {
+      multiSelections = [...cachedSelections];
+    }
+
+    const opts: string[] = Array.isArray(currentQuestion.options) ? currentQuestion.options : [];
+
+    if (isDoneReply) {
+      if (multiSelections.length === 0) {
+        await sendMessage(phone, 'Please select at least one option before tapping Done ✅.');
+        return sendQuestion(phone, { ...currentQuestion, multiSelections }, session);
+      }
+
+      const responseText = multiSelections.join(', ');
+      await saveSurveyResponse({
+        db,
+        session,
+        phone,
+        responseText,
+        responseId: `${session.id}_q${currentIndex + 1}_multi`,
+      });
+
+      await updateSessionMultiSelections(db, session.id, currentIndex, []);
+
+      const nextCache = { ...(multiSelectionCache.get(cacheKey) || {}) };
+      delete nextCache[currentIndex];
+      if (Object.keys(nextCache).length === 0) multiSelectionCache.delete(cacheKey);
+      else multiSelectionCache.set(cacheKey, nextCache);
+
+      const answers = await buildAnswersMap(db, session.id, questions, currentIndex, responseText);
+      const nextIndex = findNextVisibleQuestion(questions, currentIndex + 1, answers);
+
+      if (nextIndex >= questions.length) {
+        await completeSession(db, session.id);
+        const responses = await getSurveyResponsesBySession(db, session.id);
+        const recapLines = responses.length > 0
+          ? responses.map((r, i) => `*${r.question_text || `Question ${i + 1}`}*\n${r.response_text || 'No response'}`).join('\n\n')
+          : 'No responses recorded.';
+        await sendMessage(phone, `Thanks! Survey completed.\n\nThis is what we received:\n\n${recapLines}`);
+        return;
+      }
+
+      await updateSessionProgress(db, session.id, nextIndex);
+      session.current_question = nextIndex;
+      return sendQuestion(phone, questions[nextIndex], session);
+    }
+
+    let selectedOpt: string | null = null;
+
+    if (replyId && replyId.includes(`_q${currentIndex + 1}_multi_opt`)) {
+      const m = replyId.match(/_opt(\d+)$/);
+      if (m) {
+        const idx = parseInt(m[1], 10) - 1;
+        if (opts[idx]) selectedOpt = opts[idx];
+      }
+    } else {
+      const norm = normalizeForMatch(rawAnswer);
+      const normalizedOpts = opts.map((o) => normalizeForMatch(o));
+      const matchIdx = normalizedOpts.indexOf(norm);
+      if (matchIdx >= 0) selectedOpt = opts[matchIdx];
+    }
+
+    if (!selectedOpt) {
+      await sendMessage(phone, 'Please select from the available options, or tap *Done ✅* when finished.');
+      return sendQuestion(phone, { ...currentQuestion, multiSelections }, session);
+    }
+
+    if (multiSelections.includes(selectedOpt)) {
+      multiSelections = multiSelections.filter((s) => s !== selectedOpt);
+    } else {
+      multiSelections = [...multiSelections, selectedOpt];
+    }
+
+    await updateSessionMultiSelections(db, session.id, currentIndex, multiSelections);
+    session.questions_data[currentIndex] = { ...currentQuestion, multiSelections };
+    multiSelectionCache.set(cacheKey, {
+      ...(multiSelectionCache.get(cacheKey) || {}),
+      [currentIndex]: [...multiSelections],
+    });
+
+    return sendQuestion(phone, { ...currentQuestion, multiSelections }, session);
+  }
+
+  // Standard single-select / text
   let responseTextToSave = rawAnswer;
   let responseIdToSave = message.id;
 
-  // Treat a question with `options` but no explicit `type` as interactive
-  const isInteractiveQuestion = (currentQuestion?.type === 'button' || currentQuestion?.type === 'list' || (currentQuestion?.options?.length && !currentQuestion?.type));
+  const isInteractiveQuestion = currentQuestion?.type === 'button' || currentQuestion?.type === 'list' || (currentQuestion?.options?.length && !currentQuestion?.type);
   if (isInteractiveQuestion && currentQuestion.options?.length) {
-    // Normalize available options (strip emoji/punctuation so "Likely 🟢" matches "likely")
     const normalizedOptions = currentQuestion.options.map((opt: string) => normalizeForMatch(opt));
-
-    // If reply came as an id (we set ids when sending options), map it back to option text
     const replyId = buttonReply?.id || listReply?.id;
+
     if (replyId && typeof replyId === 'string' && replyId.includes(session.id)) {
-      // Expect format: {sessionId}_q{n}_opt{m}
       const m = replyId.match(/_opt(\d+)$/);
       if (m) {
         const idx = parseInt(m[1], 10) - 1;
@@ -202,60 +262,38 @@ export async function handleSurveyMessage({
         }
       }
     } else {
-      // otherwise match by title/text
       const normalizedAnswer = normalizeForMatch(rawAnswer || '');
-      console.log('normalizedOptions:', normalizedOptions, 'normalizedAnswer:', normalizedAnswer)
       if (!normalizedOptions.includes(normalizedAnswer)) {
-        console.log("Invalid option provided - resending question")
-        await sendMessage(phone,  "Please select from the available options below")
-        // Re-send SAME question (do NOT move forward)
-        return sendQuestion(phone, currentQuestion, session)
+        await sendMessage(phone, 'Please select from the available options below');
+        return sendQuestion(phone, currentQuestion, session);
       }
-      // map normalized answer back to original option (preserve formatting)
       const matchedIndex = normalizedOptions.indexOf(normalizedAnswer);
       if (matchedIndex >= 0) responseTextToSave = currentQuestion.options[matchedIndex];
     }
   }
 
-  // --- 2. SAVE RESPONSE -----------------------------------------
   await saveSurveyResponse({
     db,
     session,
     phone,
     responseText: responseTextToSave,
     responseId: responseIdToSave,
-  })
+  });
 
-  // --- 3. BUILD ANSWERS MAP (for showIf evaluation) -------------
   const answers = await buildAnswersMap(db, session.id, questions, currentIndex, responseTextToSave);
-
-  // --- 4. FIND NEXT VISIBLE QUESTION ----------------------------
   const nextIndex = findNextVisibleQuestion(questions, currentIndex + 1, answers);
 
-  // --- 5. CHECK IF DONE -----------------------------------------
   if (nextIndex >= questions.length) {
-    await completeSession(db, session.id)
-
-    const responses = await getSurveyResponsesBySession(db, session.id)
+    await completeSession(db, session.id);
+    const responses = await getSurveyResponsesBySession(db, session.id);
     const recapLines = responses.length > 0
-      ? responses.map((response, index) => {
-        const questionLabel = response.question_text || `Question ${index + 1}`;
-        const answerLabel = response.response_text || 'No response recorded';
-        return `*${questionLabel}*\n${answerLabel}`;
-      }).join('\n\n')
-      : 'No responses were recorded.';
-
-    await sendMessage(
-      phone,
-      `Thanks! Survey completed.\n\nThis is what we received:\n\n${recapLines}`
-    )
-    return
+      ? responses.map((r, i) => `*${r.question_text || `Question ${i + 1}`}*\n${r.response_text || 'No response'}`).join('\n\n')
+      : 'No responses recorded.';
+    await sendMessage(phone, `Thanks! Survey completed.\n\nThis is what we received:\n\n${recapLines}`);
+    return;
   }
 
-  // --- 6. UPDATE SESSION & SEND NEXT QUESTION -------------------
-  await updateSessionProgress(db, session.id, nextIndex)
-  session.current_question = nextIndex
-
-  const nextQuestion = questions[nextIndex]
-  await sendQuestion(phone, nextQuestion, session)
+  await updateSessionProgress(db, session.id, nextIndex);
+  session.current_question = nextIndex;
+  return sendQuestion(phone, questions[nextIndex], session);
 }

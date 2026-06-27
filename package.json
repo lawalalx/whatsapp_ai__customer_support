@@ -4,7 +4,6 @@
   "description": "",
   "main": "index.js",
   "packageManager": "pnpm@10.5.2",
-
   "scripts": {
     "start:port": "node --import=tsx/esm src/index.ts --port",
     "dev": "node --import=tsx/esm src/index.ts",
@@ -47,6 +46,7 @@
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^4.6.3",
     "uuid": "^13.0.0",
+    "ws": "^8.21.0",
     "xlsx": "^0.18.5",
     "zod": "^4.3.6"
   },
@@ -54,12 +54,11 @@
     "@types/express": "^4.17.21",
     "@types/fs-extra": "^11.0.4",
     "@types/multer": "^2.1.0",
-
     "@types/node": "^20.11.30",
-
     "@types/pg": "^8.20.0",
     "@types/swagger-ui-express": "^4.1.8",
     "@types/uuid": "^11.0.0",
+    "@types/ws": "^8.18.1",
     "dotenv-cli": "^11.0.0",
     "mastra": "^1.6.2",
     "nodemon": "^3.1.14",

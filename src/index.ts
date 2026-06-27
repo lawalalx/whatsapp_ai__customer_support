@@ -6,6 +6,7 @@ import { z } from 'zod';
 import crypto from "crypto";
 import swaggerUi from 'swagger-ui-express';
 import express, { Application, Request, Response } from 'express';
+import { createServer } from 'http';
 import { MastraServer } from '@mastra/express';
 import { mastra } from './mastra/index.js';
 
@@ -34,10 +35,12 @@ import {
 // RAG / Knowledge Base
 import kbUploadRoute from './mastra/core/rag/routes/upload.route.js';
 import kbDocsRoute from './mastra/core/rag/routes/docs.route.js';
+import feedbackSurveyRoute from './routes/feedback-survey.route.js';
 import { createKbDocsTable } from './mastra/core/rag/db.js';
 import { initVectorIndex } from './mastra/core/rag/vector-store.js';
 import { warmUpEmbeddingModel } from "./mastra/core/llm/provider.js";
 import { buildAdminListQuery } from "./utils/build-filter.js";
+import { setupRealtimeHub, broadcastEscalationMessage } from './utils/realtime.js';
 
 const seenInboundMessageIds = new Map<string, number>();
 const SEEN_INBOUND_TTL_MS = 10 * 60 * 1000;
@@ -61,6 +64,7 @@ function isDuplicateInboundMessage(messageId: string): boolean {
 
 
 const app: Application = express();
+app.locals.mastra = mastra;
 
 await warmUpEmbeddingModel().catch(console.error);
 
@@ -78,14 +82,41 @@ const PORT =
 
 
 const URL =
-  process.env.REMOTE_URL?.replace(/\/$/, '') ||
+  process.env.LOCAL_URL?.replace(/\/$/, '') ||
   process.env.SERVER_URL?.replace(/\/$/, '');
 
 app.use(express.json());
 
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowed = new Set([
+    'http://127.0.0.1:5500',
+    'http://localhost:5500',
+    'http://127.0.0.1:3000',
+    'http://localhost:3000',
+  ]);
+
+  if (origin && allowed.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  }
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
+
+
 // Knowledge Base routes
 app.use('/api/kb/upload', kbUploadRoute);
 app.use('/api/kb/docs', kbDocsRoute);
+app.use('/admin/feedback-survey', feedbackSurveyRoute);
 
 app.use((req, res, next) => {
   res.setHeader('ngrok-skip-browser-warning', 'true');
@@ -234,11 +265,12 @@ const swaggerDocument = {
       properties: {
         id: { type: 'string', description: 'Unique identifier used as the form field name.' },
         text: { type: 'string', description: 'The question text shown to the user.' },
-        type: { type: 'string', enum: ['list', 'button', 'text', 'textarea', 'date'], description: 'The UI component type.' },
-        options: { type: 'array', items: { type: 'string' }, description: 'Array of strings for list or button types.' },
+        type: { type: 'string', enum: ['list', 'button', 'multi', 'text', 'textarea', 'date'], description: 'The UI component type.' },
+        options: { type: 'array', items: { type: 'string' }, description: 'Array of strings for list, button, or multi types.' },
         required: { type: 'boolean', default: true, description: 'Whether the field is mandatory.' },
         placeholder: { type: 'string', description: 'Helper text shown inside the component.' },
         sectionTitle: { type: 'string', description: 'Optional section label for RadioButtonsGroup.' },
+        allowMultiple: { type: 'boolean', description: 'When true, the question supports multi-select.' },
         showIf: { $ref: '#/components/schemas/FlowCondition', description: 'Optional condition to control visibility dynamically.' }
       }
     },
@@ -258,7 +290,7 @@ const swaggerDocument = {
         properties: {
           id: { type: 'string', example: 'satisfaction', description: 'Unique field identifier (no spaces). Used to reference this question in `showIf.dependsOn`.' },
           text: { type: 'string', example: 'How satisfied are you with our service?', description: 'The question text shown to the customer.' },
-          type: { type: 'string', enum: ['button', 'list', 'text'], description: '`button` = interactive reply buttons (max 3); `list` = scrollable list (max 10); `text` = free-text reply.' },
+          type: { type: 'string', enum: ['button', 'list', 'text', 'multi'], description: '`button` = interactive reply buttons (max 3); `list` = scrollable list (max 10); `multi` = multi-select list/buttons; `text` = free-text reply.' },
           options: { type: 'array', items: { type: 'string' }, example: ['Very Satisfied', 'Satisfied', 'Neutral', 'Dissatisfied', 'Very Dissatisfied'], description: 'Required for `button` and `list` types.' },
           sectionTitle: { type: 'string', example: 'Rating', description: 'Optional header shown above a button group.' },
           placeholder: { type: 'string', example: 'Please share your experience...', description: 'Placeholder/hint text for free-text questions.' },
@@ -355,7 +387,7 @@ const swaggerDocument = {
                   description: 'Optional approved WhatsApp template id to use for the survey intro message. If not provided or send fails, system falls back to interactive intro.'
                 }
               },
-              required: ['to', 'surveyId', 'topic', 'mode']
+              required: ['to', 'topic', 'mode']
             },
             examples: {
               ai_mode: {
@@ -522,7 +554,7 @@ const swaggerDocument = {
               schema: { $ref: '#/components/schemas/MetaFlowSurveyDefinition' },
               examples: {
                 csat: {
-                  summary: 'CSAT Survey (with conditional visibility)',
+                  summary: 'Meta survey with mixed question types and conditional visibility',
                   value: {
                     name: 'Post-Transaction Survey',
                     description: 'Help us improve your banking experience. Takes 1 minute.',
@@ -531,8 +563,21 @@ const swaggerDocument = {
                     autoPublish: false,
                     "questions": [
                       { 
-                        "id": "satisfaction", 
-                        "text": "How satisfied are you with our service?", 
+                        "id": "service_channels", 
+                        "text": "Which of our services do you use? (Select all that apply)", 
+                        "type": "multi", 
+                        "options": [
+                          "Mobile Banking",
+                          "Internet Banking",
+                          "ATM Services",
+                          "Branch Banking"
+                        ], 
+                        "allowMultiple": true,
+                        "required": true 
+                      },
+                      { 
+                        "id": "overall_rating", 
+                        "text": "How would you rate our overall service?", 
                         "type": "list", 
                         "options": [
                           "Very Satisfied",
@@ -544,36 +589,42 @@ const swaggerDocument = {
                         "required": true 
                       },
                       { 
-                        "id": "satisfaction_reason", 
-                        "text": "We are sorry to hear that. What went wrong?", 
-                        "type": "textarea", 
+                        "id": "additional_comment", 
+                        "text": "Any other comments or feedback for us?", 
+                        "type": "text", 
                         "required": false, 
-                        "placeholder": "Please share your experience...",
+                        "placeholder": "Type your feedback here..."
+                      },
+                      { 
+                        "id": "improvement_areas", 
+                        "text": "Which areas should we improve? (Select all that apply)", 
+                        "type": "multi", 
+                        "options": [
+                          "Speed",
+                          "Customer Support",
+                          "Security",
+                          "User Experience"
+                        ], 
+                        "allowMultiple": true,
+                        "required": false,
                         "showIf": { 
-                          "dependsOn": "satisfaction", 
-                          "equals": "Very Dissatisfied" 
+                          "dependsOn": "overall_rating", 
+                          "equals": "Dissatisfied" 
                         }
                       },
                       { 
-                        "id": "recommend", 
-                        "text": "Would you recommend FBNBank to a friend?", 
+                        "id": "recommendation", 
+                        "text": "Would you recommend FBNBank to a friend or colleague?", 
                         "type": "button", 
                         "options": [
                           "Yes",
                           "No",
                           "Maybe"
                         ], 
-                        "required": true 
-                      },
-                      { 
-                        "id": "improvement", 
-                        "text": "What is the main reason you wouldn't recommend us?", 
-                        "type": "textarea", 
-                        "required": false, 
-                        "placeholder": "Tell us how we can improve...",
+                        "required": true,
                         "showIf": { 
-                          "dependsOn": "recommend", 
-                          "equals": "No" 
+                          "dependsOn": "overall_rating", 
+                          "equals": "Very Dissatisfied" 
                         }
                       }
                     ]
@@ -949,37 +1000,45 @@ Use cases:
             schema: { $ref: '#/components/schemas/SurveyTemplate' },
             examples: {
               csat_with_conditional: {
-                summary: 'CSAT Survey with conditional follow-up',
+                summary: 'Survey with mixed single-select, multi-select, text, and conditional follow-up',
                 value: {
                   id: 'csat-q2-2026',
                   name: 'Post-Transaction Satisfaction Survey',
                   mode: 'manual',
                   questions: [
                     {
-                      id: 'satisfaction',
-                      text: 'How satisfied are you with our service today?',
+                      id: 'service_channels',
+                      text: 'Which of our services do you use? (Select all that apply)',
+                      type: 'multi',
+                      options: ['Mobile Banking', 'Internet Banking', 'ATM Services', 'Branch Banking'],
+                      allowMultiple: true,
+                    },
+                    {
+                      id: 'overall_rating',
+                      text: 'How would you rate our overall service?',
                       type: 'list',
                       options: ['Very Satisfied', 'Satisfied', 'Neutral', 'Dissatisfied', 'Very Dissatisfied'],
                     },
                     {
-                      id: 'satisfaction_reason',
-                      text: 'We are sorry to hear that. What went wrong?',
+                      id: 'additional_comment',
+                      text: 'Any other comments or feedback for us?',
                       type: 'text',
-                      placeholder: 'Please describe your experience...',
-                      showIf: { dependsOn: 'satisfaction', equals: 'Very Dissatisfied' },
+                      placeholder: 'Type your feedback here...',
                     },
                     {
-                      id: 'recommend',
+                      id: 'improvement_areas',
+                      text: 'Which areas should we improve? (Select all that apply)',
+                      type: 'multi',
+                      options: ['Speed', 'Customer Support', 'Security', 'User Experience'],
+                      allowMultiple: true,
+                      showIf: { dependsOn: 'overall_rating', equals: 'Dissatisfied' },
+                    },
+                    {
+                      id: 'recommendation',
                       text: 'Would you recommend FBNBank to a friend or colleague?',
                       type: 'button',
                       options: ['Yes', 'No', 'Maybe'],
-                    },
-                    {
-                      id: 'improvement',
-                      text: 'What is the main reason you would not recommend us?',
-                      type: 'text',
-                      placeholder: 'Tell us how we can improve...',
-                      showIf: { dependsOn: 'recommend', equals: 'No' },
+                      showIf: { dependsOn: 'overall_rating', equals: 'Very Dissatisfied' },
                     },
                   ],
                 },
@@ -2504,6 +2563,9 @@ Supported message types:
     }
   },
 
+  // feedback survey route
+  
+
   '/api/kb/upload': {
     post: {
       summary: 'Upload document(s) to knowledge base',
@@ -2827,9 +2889,10 @@ const SurveyQuestionSchema = z.object({
   id: z.string(),
   text: z.string(),
   options: z.array(z.string()).optional(),
-  type: z.enum(['button', 'list', 'text']),
+  type: z.enum(['button', 'list', 'text', 'multi']),
   sectionTitle: z.string().optional(),
   placeholder: z.string().optional(),
+  allowMultiple: z.boolean().optional(),
   showIf: z.object({
     dependsOn: z.string(),
     equals: z.string(),
@@ -3203,6 +3266,14 @@ app.post('/admin/escalation/:ticketId/message', async (req: Request, res: Respon
           parse.data.templateData || {}
         )}`,
         escalationId: ticketId,
+      });
+
+      broadcastEscalationMessage({
+        ticketId,
+        threadId: result.to,
+        phone: result.to,
+        direction: 'outbound',
+        message: parse.data.message || `[Template:${parse.data.templateId}]`,
       });
     } catch (error) {
       console.error('Failed to log outbound human chat message', error);
@@ -4616,11 +4687,12 @@ await initVectorIndex().catch(console.error);
 
 async function startServer() {
   try {
+    const httpServer = createServer(app);
+    setupRealtimeHub(httpServer);
     const server = new MastraServer({ app: app as any, mastra });
     await server.init();
 
-    // const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
-    app.listen(PORT, () => {
+    httpServer.listen(PORT, () => {
       console.log(`Server is listening at ${PORT} and running at ${URL}`);
     });
   } catch (error) {

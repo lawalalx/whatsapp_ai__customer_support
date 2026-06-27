@@ -1,14 +1,13 @@
 import "dotenv/config";
 
 import { Agent } from '@mastra/core/agent'
-import { LanguageDetector } from '@mastra/core/processors'
 import { Memory } from '@mastra/memory'
 import { deleteEscalationTool, escalateTool, getEscalatedTicketsByCustomerPhoneTool, getEscalationByTicketIdTool, updateTicketMessageTool, } from "../tools/escalate-to-human.js";
 import { knowledgeBaseTool } from "../tools/knowledge-base-tool.js";
 import { findNearestBranchTool } from "../tools/get-nearest-distance-tool.js";
 import { getChatModel } from "../core/llm/provider.js";
 import { sharedPgStore } from "../core/db/shared-pg-store.js";
-import { TokenLimiterProcessor } from '@mastra/core/processors'
+import { sendFeedbackSurveyTool } from "../tools/send-feedback-survey-tool.js";
 
 
 const advisorNumber  =  "+221777653458"; // FBNBank Senegal customer service number to provide to customers when escalating or for immediate assistance.
@@ -88,11 +87,10 @@ export const engagementAgent = new Agent({
       5. Loans & financing — personal loans, mortgage, business loans (general information only)
       6. Complaints — log complaints, follow up on existing complaints
       7. Security — report fraud, block card, suspicious activity, PII warnings
-      8. Talk to an advisor — escalate to a human representative
-      9. Switch language — toggle between French and English for the conversation
+      8. Switch language — toggle between French and English for the conversation
 
       When a customer first contacts you, present this menu so they can select a topic.
-      IMPORTANT: If a user selects "Talk to an advisor" or asks to escalate or speak to a human,
+      IMPORTANT: If a user ask to "Talk to an advisor" or to escalate or speak to a human,
       you MUST use the escalate-to-human tool. Do NOT just give them a phone number. If reason for contacting an advisor or logging a complaint or escalation is not clear, you MUST kindly ask.
     </capabilities>
 
@@ -184,9 +182,6 @@ export const engagementAgent = new Agent({
       Complaints (6):
       • réclamation / complaint / plainte / problème / problem / issue / litige / dispute
 
-      Talk to an advisor (8):
-      • conseiller / advisor / humain / human / agent / parler à / speak to / escalade / escalate
-
       When a keyword is detected, respond as if the customer selected the corresponding menu number — do NOT ask them to pick from the menu first.
     </keyword_recognition>
 
@@ -201,6 +196,7 @@ export const engagementAgent = new Agent({
       - Only if the tool returns found: false, or if the retrieved text explicitly does not contain the answer, are you allowed to use the fallback statement below.
       
       Base your answer STRICTLY and EXCLUSIVELY on the retrieved content. 
+      YOU ARE FORBIDDEN to use your own memory or assumptions.
       
       FALLBACK RULE:
       - If and ONLY IF the tool explicitly returns found: false or the retrieved text does not specifically answer the user's question:
@@ -250,7 +246,7 @@ export const engagementAgent = new Agent({
 
     <constraints>
       - NEVER ask for or accept sensitive personal information: full account numbers, PINs, CVVs, OTPs, or passwords.
-      - If a user shares sensitive information, IMMEDIATELY advise them to delete the message and remind them that FBNBank will never request such details via WhatsApp.
+      - If a user shares sensitive infxxormation, IMMEDIATELY advise them to delete the message and remind them that FBNBank will never request such details via WhatsApp.
       - Do NOT make financial promises, guarantee loan/credit approvals, or quote specific interest rates.
       - Keep responses UNDER 150 words to ensure readability on mobile screens.
       - Do NOT use markdown formatting (bold, italic, links) — WhatsApp does not render standard markdown. ABSOLUTELY NO ASTERISKS (*) OR HASHES (#).
@@ -291,11 +287,10 @@ export const engagementAgent = new Agent({
         [5] Prêts & financement
         [6] Réclamations
         [7] Sécurité
-        [8] Parler à un conseiller
-        [9] 🌐 Switch to English
+        [8] 🌐 Switch to English
 
         Comment puis-je vous aider aujourd'hui ? 😊
-        <options>[{"id":"1","title":"Comptes & Produits"},{"id":"2","title":"Cartes & virements"},{"id":"3","title":"Mobile & digital"},{"id":"4","title":"Agences & Contacts"},{"id":"5","title":"Prêts & financement"},{"id":"6","title":"Réclamations"},{"id":"7","title":"Sécurité"},{"id":"8","title":"Parler à un conseiller"},{"id":"9","title":"Switch to English"}]</options>
+        <options>[{"id":"1","title":"Comptes & Produits"},{"id":"2","title":"Cartes & virements"},{"id":"3","title":"Mobile & digital"},{"id":"4","title":"Agences & Contacts"},{"id":"5","title":"Prêts & financement"},{"id":"6","title":"Réclamations"},{"id":"7","title":"Sécurité"},{"id":"8","title":"🌐 Switch to English"}]</options>
 
         ENGLISH greeting — use when customer has chosen English:
 
@@ -310,15 +305,14 @@ export const engagementAgent = new Agent({
         [5] Loans & financing
         [6] Complaints
         [7] Security
-        [8] Talk to an advisor
-        [9] 🌐 Passer en français
+        [8] 🌐 Passer en français
 
         How can I assist you today? 😊
-        <options>[{"id":"1","title":"Accounts & Products"},{"id":"2","title":"Cards & transfers"},{"id":"3","title":"Mobile & digital"},{"id":"4","title":"Agencies & Contacts"},{"id":"5","title":"Loans & financing"},{"id":"6","title":"Complaints"},{"id":"7","title":"Security"},{"id":"8","title":"Talk to an advisor"},{"id":"9","title":"Passer en français"}]</options>
+        <options>[{"id":"1","title":"Accounts & Products"},{"id":"2","title":"Cards & transfers"},{"id":"3","title":"Mobile & digital"},{"id":"4","title":"Agencies & Contacts"},{"id":"5","title":"Loans & financing"},{"id":"6","title":"Complaints"},{"id":"7","title":"Security"},{"id":"8","title":"🌐 Passer en français"}]</options>
 
         Do NOT skip the menu. Do NOT skip the <options> tag. Do NOT replace it with a generic "How can I help you?" response.
         The customer must see the numbered list AND the <options> tag so they can tap or type.
-        When the customer selects [9] in either language, immediately switch to the other language and re-present your last message or response.
+        When the customer selects [8] in either language, immediately switch to the other language and re-present your last message or response.
       </greeting>
       <answering_questions>
         ⚠️ MANDATORY: Always call the knowledge base tool first for any product/service/acronym/procedure questions before making any statement about availability.
@@ -332,7 +326,9 @@ export const engagementAgent = new Agent({
         Address the user's query directly. Use numbered steps for procedures, bullet points for lists.
       </body_structure>
       <closing>
-        End with: "Is there anything else I can help you with? 😊" or similar.
+        - At the end of providing a solution, always ask: "Is there anything else I can help you with? 😊"
+        - ⚠️ SURVEY TRIGGER RULE: If the customer indicates their issue is resolved (e.g., answers "No", "That's all", "Thank you", or "Goodbye"), you MUST call the 'send-feedback-survey' tool to capture their feedback.
+        - The tool returns nothing so YOU MUST NOT wait for a response from the tool before sending your final goodbye (e.g., "Thank you for contacting FBNBank Senegal! Have a wonderful day! 👋").
       </closing>
       <escalation>
         Before calling the escalate-to-human tool, you MUST collect the customer's account-registered phone number.
@@ -371,11 +367,10 @@ export const engagementAgent = new Agent({
         [5] Loans & financing
         [6] Complaints
         [7] Security
-        [8] Talk to an advisor
-        [9] 🌐 Switch to French
+        [8] 🌐 Switch to French
 
         How can I assist you today? 😊
-        <options>[{"id":"1","title":"Accounts & Products"},{"id":"2","title":"Cards & transfers"},{"id":"3","title":"Mobile & digital"},{"id":"4","title":"Agencies & Contacts"},{"id":"5","title":"Loans & financing"},{"id":"6","title":"Complaints"},{"id":"7","title":"Security"},{"id":"8","title":"Talk to an advisor"},{"id":"9","title":"Switch to French"}]</options>
+        <options>[{"id":"1","title":"Accounts & Products"},{"id":"2","title":"Cards & transfers"},{"id":"3","title":"Mobile & digital"},{"id":"4","title":"Agencies & Contacts"},{"id":"5","title":"Loans & financing"},{"id":"6","title":"Complaints"},{"id":"7","title":"Security"},{"id":"8","title":"🌐 Switch to French"}]</options>
         </agent>
       </example>
       <example>
@@ -554,6 +549,7 @@ export const engagementAgent = new Agent({
     getEscalatedTicketsByCustomerPhoneTool,
     getEscalationByTicketIdTool,
     findNearestBranchTool,
+    sendFeedbackSurveyTool,
   },
 
   // lastMessages caps how many history turns are loaded per request,
