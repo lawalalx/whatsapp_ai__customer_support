@@ -5,7 +5,7 @@ import { vectorStore, INDEX_NAME } from './vector-store.js';
 import { getChatModel, getEmbeddingModel } from '../llm/provider.js';
 import { bm25Score, fuseHybridScores, ScoredChunk } from './bm25.js';
 
-export async function retrieveContext(query: string, topK = 5) {
+export async function retrieveContext(query: string, topK = 10) {
   const { embedding } = await embed({ model: getEmbeddingModel(), value: query });
 
   const initialResults: any[] = await vectorStore.query({

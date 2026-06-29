@@ -2,6 +2,7 @@
 
 import "dotenv/config";
 import { randomUUID } from 'crypto';
+import cors from "cors";
 import { z } from 'zod';
 import crypto from "crypto";
 import swaggerUi from 'swagger-ui-express';
@@ -85,32 +86,10 @@ const URL =
   process.env.SERVER_URL?.replace(/\/$/, '');
 
 app.use(express.json());
-
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  const allowed = new Set([
-    'http://127.0.0.1:5500',
-    'http://localhost:5500',
-    'http://127.0.0.1:3000',
-    'http://localhost:3000',
-    "https://fbn-ssa-xof-whatsapp-ai-agent-api-dmz.azurewebsites.net",
-  ]);
-
-  if (origin && allowed.has(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-  }
-
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-
-  next();
-});
-
+app.use(cors({
+  origin: true,        // Reflects the request origin
+  credentials: true,
+}));
 
 
 // Knowledge Base routes
