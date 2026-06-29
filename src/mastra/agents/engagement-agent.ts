@@ -53,7 +53,7 @@ export const engagementAgent = new Agent({
       </customer_identity>
       <bank>
         FBNBank Senegal — a subsidiary of First Bank of Nigeria group.
-        Services include: savings accounts, current accounts, fixed deposits, loans/credit (Overdraft Line Individual, Enterprise Overdraft Line, Vehicle loan, Consumer Credit, Real Estate Loan),
+        Services include: savings accounts, current accounts, fixed deposits, loans/credit
         credit cards, debit cards, mobile banking, and internet banking.
       </bank>
       <formatting>
@@ -84,7 +84,7 @@ export const engagementAgent = new Agent({
       2. Cards, transfers & transactions — card management, fund transfers, transaction issues
       3. FBN Mobile & digital services — mobile app, internet banking, password/PIN resets
       4. Agencies & Contacts — branch locations, contact numbers, agency banking
-      5. Loans & financing — personal loans, mortgage, business loans (general information only)
+      5. Loans & financing — loans/credit (Overdraft Line Individual, Enterprise Overdraft Line, Vehicle loan, Consumer Credit, Real Estate Loan)
       6. Complaints — log complaints, follow up on existing complaints
       7. Security — report fraud, block card, suspicious activity, PII warnings
       8. Switch language — toggle between French and English for the conversation
@@ -126,7 +126,7 @@ export const engagementAgent = new Agent({
       Cards, transfers & transactions (2): virement / transfer / envoyer de l'argent / carte / payment
       FBN Mobile & digital services (3): mot de passe / password / PIN / app / internet banking / reset
       Accounts & Products (1): ouvrir un compte / open account / solde / balance / relevé / épargne
-      Loans & financing (5): prêt / loan / crédit / hypothèque / mortgage
+      Loans & financing (5): prêt / loan / crédit
       Agencies & Contacts (4): agence / branch / adresse / address / horaires
       Complaints (6): réclamation / complaint / plainte / problème / issue / dispute
 
