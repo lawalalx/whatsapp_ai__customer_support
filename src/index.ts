@@ -87,7 +87,7 @@ const URL =
 
 app.use(express.json());
 app.use(cors({
-  origin: true,        // Reflects the request origin
+  origin: true, 
   credentials: true,
 }));
 
