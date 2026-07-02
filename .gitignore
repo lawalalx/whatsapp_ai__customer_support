@@ -22,3 +22,5 @@ scripts/
 META_TEMPLATES.md
 *.docx
 *.pdf
+generate_senegal_docs.py
+*.png
