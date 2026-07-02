@@ -4655,26 +4655,47 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
 
 
 
+let isReady = false;
+
+app.get('/health', (_req, res) => {
+  res.status(isReady ? 200 : 503).json({
+    status: isReady ? 'ready' : 'starting',
+  });
+});
 
 
 
 
-await initDatabase().catch(console.error);
-await createKbDocsTable().catch(console.error);
-await initVectorIndex().catch(console.error);
+async function initialize() {
+  try {
+    await initDatabase();
+    await createKbDocsTable();
+    await initVectorIndex();
+
+    isReady = true;
+    console.log("Application is ready.");
+  } catch (err) {
+    console.error("Initialization failed:", err);
+    process.exit(1);
+  }
+}
 
 async function startServer() {
   try {
     const httpServer = createServer(app);
     setupRealtimeHub(httpServer);
+
     const server = new MastraServer({ app: app as any, mastra });
     await server.init();
 
     httpServer.listen(PORT, () => {
-      console.log(`Server is listening at ${PORT} and running at ${URL}`);
+      console.log(`Server listening on ${PORT}`);
     });
+
+    // Don't wait for initialization before listening
+    initialize();
   } catch (error) {
-    console.error('Error starting server:', error);
+    console.error(error);
     process.exit(1);
   }
 }
