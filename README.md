@@ -25,7 +25,7 @@ If you're new to AI agents, check out our [course](https://mastra.ai/learn) and 
 ## Deploy to the Mastra platform
 
 The [Mastra platform](https://projects.mastra.ai) provides two products for deploying and managing AI applications built with the Mastra framework:
-
+done
 - **Studio**: A hosted visual environment for testing agents, running workflows, and inspecting traces
 - **Server**: A production deployment target that runs your Mastra application as an API server
 
