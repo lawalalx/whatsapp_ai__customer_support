@@ -8,6 +8,7 @@ import { findNearestBranchTool } from "../tools/get-nearest-distance-tool.js";
 import { getChatModel } from "../core/llm/provider.js";
 import { sharedPgStore } from "../core/db/shared-pg-store.js";
 import { sendFeedbackSurveyTool } from "../tools/send-feedback-survey-tool.js";
+import { collectAccountNumberViaMetaFlowTool } from "../tools/collect-account-number-flow-tool.js";
 
 
 const advisorNumber  =  "+221777653458"; // FBNBank Senegal customer service number to provide to customers when escalating or for immediate assistance.
@@ -193,7 +194,10 @@ export const engagementAgent = new Agent({
         - [ ] 2. Check if the reason/issue details are clear. If the user just says "transfer me", politely ask: "I can certainly look into that for you. May I know the specific issue or reason so I can see if I can resolve it for you right away? 😊"
         - [ ] 3. Once details are provided, force a 'knowledge-base-search' tool call to check if the answer exists.
         - [ ] 4. IF THE SOLUTION IS FOUND: Provide the answer directly to try and solve it. Do NOT escalate yet.
-        - [ ] 5. IF THE SOLUTION IS NOT FOUND: Confirm that the system lacks details, ask for/verify their account-registered phone number, and only then trigger the 'escalate-to-human' tool.
+        - [ ] 5. IF THE SOLUTION IS NOT FOUND: Confirm that the system lacks details, ask for/verify their account-registered phone number.
+        - [ ] 6. Trigger the 'collect-account-number-via-meta-flow' tool to securely capture account number outside chat.
+        - [ ] 7. If the tool returns status='pending', ask the customer to complete the secure form and confirm in chat, then call the tool again.
+        - [ ] 8. Only when the tool returns status='collected', trigger the 'escalate-to-human' tool with both customerPhone and userAccountNumber.
     </execution_checklists>
 
     <location_handling>
@@ -203,7 +207,8 @@ export const engagementAgent = new Agent({
     </location_handling>
 
     <constraints>
-      - NEVER ask for or accept sensitive personal information: full account numbers, PINs, CVVs, OTPs, or passwords.
+      - NEVER ask for or accept sensitive personal information in chat: full account numbers, PINs, CVVs, OTPs, or passwords.
+      - If account number is required for escalation, use only the 'collect-account-number-via-meta-flow' tool.
       - If a user shares sensitive information, IMMEDIATELY advise them to delete the message.
       - Keep responses UNDER 150 words to ensure readability on mobile screens.
       - Do NOT use markdown formatting (bold, italic, links) — WhatsApp does not render standard markdown. ABSOLUTELY NO ASTERISKS (*) OR HASHES (#).
@@ -254,6 +259,12 @@ export const engagementAgent = new Agent({
       <escalation>
         Before calling the escalate-to-human tool, you MUST collect the customer's account-registered phone number.
         If the customer says "use the one you have" and you have a system message containing "Customer WhatsApp phone: [number]", treat that WhatsApp number as the provided number but ask for brief confirmation first.
+      </escalation>
+
+      <escalation>
+        After phone number confirmation, call 'collect-account-number-via-meta-flow' to collect account number securely.
+        If tool status is 'pending', tell the user to complete the secure form and confirm once done.
+        Call the tool again to retrieve the submitted value. Only call 'escalate-to-human' after tool status is 'collected'.
       </escalation>
 
       <escalation>
@@ -385,7 +396,7 @@ export const engagementAgent = new Agent({
         I can use your current WhatsApp number, 221771234567. Please confirm whether this is the number linked to your FBNBank account so I can create the ticket.
         </agent>
         <user>yes it is</user>
-        <action>Agent triggers escalate-to-human tool with customerPhone="221771234567" and details="Customer needs 2018 audited statement for closed corporate account". Tool reports success.</action>
+        <action>Agent triggers collect-account-number-via-meta-flow tool with customerPhone="221771234567". Tool first reports pending, then reports collected with accountNumber after user completes secure form. Agent then triggers escalate-to-human with customerPhone and userAccountNumber.</action>
         <agent>
           I have created a ticket for your request. A customer service representative will review it shortly. For immediate assistance, you can also call us at [advisorNumber].
         </agent>
@@ -447,6 +458,7 @@ export const engagementAgent = new Agent({
     getEscalationByTicketIdTool,
     findNearestBranchTool,
     sendFeedbackSurveyTool,
+    collectAccountNumberViaMetaFlowTool,
   },
 
   // lastMessages caps how many history turns are loaded per request,

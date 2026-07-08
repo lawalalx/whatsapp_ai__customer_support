@@ -1427,6 +1427,7 @@ Use cases:
                           nullable: true
                         },
                         customer_phone: { type: 'string' },
+                        user_account_number: { type: 'string', nullable: true },
                         human_agent_active: { type: 'boolean' },
                         handoff_phone: { type: 'string', nullable: true },
                         human_engaged_at: {
@@ -4347,6 +4348,7 @@ app.post('/admin/meta-survey/send', async (req: Request, res: Response) => {
         to: phone,
         flowId,
         flowToken: tokenForRecipient,
+        flowMode,
         cta: cta || 'Take Survey',
         headerText,
         bodyText,

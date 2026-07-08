@@ -200,6 +200,8 @@ export async function listFlows(): Promise<any> {
   return await res.json();
 }
 
+
+
 // ─── Sending Flows ────────────────────────────────────────────────────────────
 
 /**
@@ -223,6 +225,7 @@ export async function sendFlowMessage(params: {
   headerText?: string;
   bodyText?: string;
   footerText?: string;
+  flowMode?: 'draft' | 'published';
   phoneNumberId?: string;
 }): Promise<any> {
   const pid = params.phoneNumberId || PHONE_NUMBER_ID;
@@ -237,6 +240,7 @@ export async function sendFlowMessage(params: {
         flow_message_version: '3',
         flow_token: params.flowToken,
         flow_id: params.flowId,
+        ...(params.flowMode ? { mode: params.flowMode } : {}),
         flow_cta: params.cta.substring(0, 20),
         flow_action: 'navigate',
         flow_action_payload: { screen: 'INTRO' },

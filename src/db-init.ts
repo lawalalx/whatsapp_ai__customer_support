@@ -173,6 +173,7 @@ export const initDatabase = async () => {
           category        TEXT CHECK (category IN ('complaint','enquiry','request')),
           ticket_status   TEXT NOT NULL DEFAULT 'pending' CHECK (ticket_status IN ('pending','completed')),
           customer_phone  TEXT,
+          user_account_number TEXT,
           human_agent_active BOOLEAN NOT NULL DEFAULT FALSE,
           archived_at     TIMESTAMPTZ,
           is_archived BOOLEAN NOT NULL DEFAULT FALSE,
@@ -195,6 +196,15 @@ export const initDatabase = async () => {
 
           ALTER TABLE escalations
           ADD COLUMN IF NOT EXISTS handoff_phone TEXT;
+        `
+      );
+
+      await runMigration(
+        client,
+        '2026_07_08_escalations_user_account_number',
+        `
+          ALTER TABLE escalations
+          ADD COLUMN IF NOT EXISTS user_account_number TEXT;
         `
       );
 

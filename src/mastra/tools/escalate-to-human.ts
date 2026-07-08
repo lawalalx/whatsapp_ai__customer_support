@@ -28,6 +28,7 @@ export const escalateTool = createTool({
     category: z.enum(['complaint', 'enquiry', 'request']),
     // handoff_phone: z.string(),
     customerPhone: z.string(),
+    userAccountNumber: z.string().optional(),
   }),
 
   outputSchema: z.object({
@@ -47,7 +48,16 @@ export const escalateTool = createTool({
     context?.agent?.threadId?.replace('thread_', '') ||
     input.customerPhone;
 
-    const params = [input.message, input.category, 'pending', ticketId, input.customerPhone, handoffPhone, createdAt];
+    const params = [
+      input.message,
+      input.category,
+      'pending',
+      ticketId,
+      input.customerPhone,
+      handoffPhone,
+      input.userAccountNumber ?? null,
+      createdAt,
+    ];
 
     // Determine DB client: prefer Mastra storage db when available
     const mastraInstance = (context as any)?.mastra ?? (context as any)?.agent?.mastra ?? undefined;
@@ -57,7 +67,7 @@ export const escalateTool = createTool({
     if (storageDb && typeof storageDb.any === 'function') {
       try {
         await storageDb.any(
-          'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, handoff_phone, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+          'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, handoff_phone, user_account_number, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
           params
         )
         console.log('Ticket created successfully (via Mastra storage)')
@@ -78,7 +88,7 @@ export const escalateTool = createTool({
     try {
       client = await pool.connect()
       await client.query(
-        'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, handoff_phone, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, handoff_phone, user_account_number, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
         params
       )
       console.log('Ticket created successfully (via local pool)')
