@@ -3,6 +3,68 @@ import { z } from 'zod'
 import pool from "../../db/index.js";
 
 
+const normalizeDigits = (value: string) => value.replace(/\D/g, '');
+
+const pickAccountNumber = (responses: Record<string, any>, preferredFieldKey?: string): string | null => {
+  if (!responses || typeof responses !== 'object') return null;
+
+  const direct = preferredFieldKey ? responses?.[preferredFieldKey] : undefined;
+  if (typeof direct === 'string' && direct.trim()) {
+    return direct.trim();
+  }
+
+  const ignoreKeys = new Set(['flow_id', 'flow_token', 'screen', 'version']);
+  for (const [key, value] of Object.entries(responses)) {
+    if (ignoreKeys.has(key)) continue;
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+};
+
+const findRecentCollectedAccountNumber = async (
+  db: { query: (query: string, params: any[]) => Promise<{ rows?: any[] }> },
+  customerPhone: string,
+): Promise<string | null> => {
+  const preferredFieldKey = process.env.ESCALATION_ACCOUNT_NUMBER_FIELD_KEY?.trim();
+  const configuredFlowId = process.env.ESCALATION_ACCOUNT_NUMBER_FLOW_ID?.trim();
+  const reuseWindowSeconds = Number.parseInt(
+    process.env.ESCALATION_ACCOUNT_NUMBER_REUSE_WINDOW_SECONDS || '300',
+    10,
+  );
+
+  const cutoff = new Date(
+    Date.now() - ((Number.isFinite(reuseWindowSeconds) && reuseWindowSeconds > 0 ? reuseWindowSeconds : 300) * 1000),
+  ).toISOString();
+
+  const params: any[] = [normalizeDigits(customerPhone), cutoff];
+  let sql = `
+    SELECT responses
+    FROM meta_flow_responses
+    WHERE source = 'data_exchange'
+      AND regexp_replace(COALESCE(customer_phone, ''), '\\D', '', 'g') = $1
+      AND created_at >= $2
+  `;
+
+  if (configuredFlowId) {
+    sql += ` AND flow_id = $3`;
+    params.push(configuredFlowId);
+  }
+
+  sql += ` ORDER BY created_at DESC LIMIT 1`;
+
+  const result = await db.query(sql, params);
+  const row = Array.isArray(result?.rows) ? result.rows[0] : null;
+  if (!row) return null;
+
+  const raw = row.responses;
+  const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  return pickAccountNumber(parsed ?? {}, preferredFieldKey);
+};
+
+
 
 
 const generateTicketId = () => {
@@ -26,15 +88,15 @@ export const escalateTool = createTool({
   inputSchema: z.object({
     message: z.string(),
     category: z.enum(['complaint', 'enquiry', 'request']),
-    // handoff_phone: z.string(),
     customerPhone: z.string(),
-    userAccountNumber: z.string().optional(),
+    userAccountNumber: z.string(),
   }),
 
   outputSchema: z.object({
     success: z.boolean(),
     ticketId: z.string().optional(),
     createdAt: z.string().optional(),
+    message: z.string().optional(),
   }),
 
   execute: async (input, context) => {
@@ -48,14 +110,37 @@ export const escalateTool = createTool({
     context?.agent?.threadId?.replace('thread_', '') ||
     input.customerPhone;
 
+    let resolvedAccountNumber = input.userAccountNumber?.trim() || null;
+
+    if (!resolvedAccountNumber) {
+      try {
+        const client = await pool.connect();
+        try {
+          resolvedAccountNumber = await findRecentCollectedAccountNumber(client as any, input.customerPhone);
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        console.error('Failed to auto-resolve account number from recent secure form submission:', error);
+      }
+    }
+
+    if (!resolvedAccountNumber) {
+      console.warn('Escalation blocked: missing user account number after secure form lookup.');
+      return {
+        success: false,
+        message: 'Missing account number. Ask the customer to complete the secure form and confirm before escalating.',
+      };
+    }
+
     const params = [
       input.message,
       input.category,
       'pending',
       ticketId,
       input.customerPhone,
+      resolvedAccountNumber,
       handoffPhone,
-      input.userAccountNumber ?? null,
       createdAt,
     ];
 
@@ -67,7 +152,7 @@ export const escalateTool = createTool({
     if (storageDb && typeof storageDb.any === 'function') {
       try {
         await storageDb.any(
-          'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, handoff_phone, user_account_number, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+          'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, user_account_number, handoff_phone, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
           params
         )
         console.log('Ticket created successfully (via Mastra storage)')
@@ -88,7 +173,7 @@ export const escalateTool = createTool({
     try {
       client = await pool.connect()
       await client.query(
-        'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, handoff_phone, user_account_number, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, user_account_number, handoff_phone, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
         params
       )
       console.log('Ticket created successfully (via local pool)')
