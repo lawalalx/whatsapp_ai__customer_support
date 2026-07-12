@@ -82,8 +82,8 @@ const formatDate = (dateVal: any): string => {
 
 
 export const escalateTool = createTool({
-  id: 'escalate-to-human',
-  description: 'Escalate conversation to a human agent',
+  id: 'transfer-to-human',
+  description: 'Transfer conversation or escalate an issue to a human agent',
   
   inputSchema: z.object({
     message: z.string(),

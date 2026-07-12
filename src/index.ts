@@ -82,7 +82,7 @@ const PORT =
 
 
 const URL =
-  process.env.REMOTE_URL?.replace(/\/$/, '') ||
+  process.env.LOCAL_URL?.replace(/\/$/, '') ||
   process.env.SERVER_URL?.replace(/\/$/, '');
 
 app.use(express.json());
@@ -4463,12 +4463,12 @@ app.post('/webhook/meta-flow-data', async (req: Request, res: Response) => {
 
     const payload = JSON.parse(decrypted);
 
-    console.log('🎯 ACTION:', payload.action);
+    // console.log('🎯 ACTION:', payload.action);
 
-    console.log(
-      'FULL FLOW PAYLOAD:',
-      JSON.stringify(payload, null, 2)
-    );
+    // console.log(
+    //   'FULL FLOW PAYLOAD:',
+    //   JSON.stringify(payload, null, 2)
+    // );
 
     const flippedIv = Buffer.from(iv.map((byte) => ~byte));
 
