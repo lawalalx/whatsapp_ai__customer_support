@@ -82,7 +82,7 @@ const PORT =
 
 
 const URL =
-  process.env.LOCAL_URL?.replace(/\/$/, '') ||
+  process.env.REMOTE_URL?.replace(/\/$/, '') ||
   process.env.SERVER_URL?.replace(/\/$/, '');
 
 app.use(express.json());
