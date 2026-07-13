@@ -22,9 +22,7 @@ export async function getActiveSurveySession(db: Pool, phone: string) {
     [phone]
   );
 
-  console.log(`\n\nChecked active session for phone ${phone}. Found: ${result.rows.length > 0}`);
-  console.log('LOOKUP PHONE:', phone);
-  console.log('SESSION RESULT:', result.rows);
+  console.log(`\n\nChecked active session. Found: ${result.rows.length > 0}`);
   return result.rows[0];
 }
 

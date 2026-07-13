@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import { Agent } from '@mastra/core/agent'
+import type { MastraMemory } from '@mastra/core/memory'
 import { Memory } from '@mastra/memory'
 import { deleteEscalationTool, escalateTool, getEscalatedTicketsByCustomerPhoneTool, getEscalationByTicketIdTool, updateTicketMessageTool, } from "../tools/escalate-to-human.js";
 import { knowledgeBaseTool } from "../tools/knowledge-base-tool.js";
@@ -11,6 +12,8 @@ import { sendFeedbackSurveyTool } from "../tools/send-feedback-survey-tool.js";
 
 
 const advisorNumber  =  "+221777653458"; // FBNBank Senegal customer service number to provide to customers when escalating or for immediate assistance.
+
+const engagementMemory = new Memory({ storage: sharedPgStore, options: { lastMessages: 15 } }) as unknown as MastraMemory;
 
 
 
@@ -471,7 +474,7 @@ export const engagementAgent = new Agent({
 
   // lastMessages caps how many history turns are loaded per request,
   // preventing unbounded memory growth for long-running conversations.
-  memory: new Memory({ storage: sharedPgStore, options: { lastMessages: 15 } }),
+  memory: engagementMemory,
 
   // defaultOptions: {
   //   autoResumeSuspendedTools: true,

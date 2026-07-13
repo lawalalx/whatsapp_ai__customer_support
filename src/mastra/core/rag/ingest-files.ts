@@ -2,7 +2,7 @@ import fs from "fs-extra";
 import csvParser from "csv-parser";
 
 /**
- * Extracts plain text from PDF, TXT, CSV, DOCX, DOC, XLSX, XLS files.
+ * Extracts plain text from PDF, TXT, CSV, DOCX, DOC, XLSX files.
  * @param originalName - The original filename (used to determine file type, since temp paths have no extension)
  */
 export async function extractText(filePath: string, originalName?: string): Promise<string> {
@@ -41,24 +41,22 @@ export async function extractText(filePath: string, originalName?: string): Prom
     return result.value;
   }
 
-  if (ext === "xlsx" || ext === "xls") {
-    const xlsxMod = await import("xlsx");
-    // Dynamic import may wrap the CommonJS module under `.default`
-    const XLSX = (xlsxMod as any).default ?? xlsxMod;
+  if (ext === "xlsx") {
+    const excelMod = await import("exceljs");
+    const ExcelJS = (excelMod as any).default ?? excelMod;
     const buffer = await fs.readFile(filePath);
-    const workbook = XLSX.read(buffer, { type: "buffer" });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
     const lines: string[] = [];
-    for (const sheetName of workbook.SheetNames) {
-      const sheet = workbook.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, {
-        defval: "",
-      }) as Record<string, unknown>[];
-      for (const row of rows) {
-        lines.push(Object.values(row).join(" "));
-      }
+    for (const sheet of workbook.worksheets) {
+      sheet.eachRow({ includeEmpty: false }, (row: any) => {
+        const values = Array.isArray(row?.values) ? row.values.slice(1) : [];
+        const text = values.filter((value: unknown) => value != null && String(value).trim() !== "").join(" ");
+        if (text) lines.push(text);
+      });
     }
     return lines.join("\n");
   }
 
-  throw new Error(`Unsupported file type: .${ext}. Allowed: pdf, txt, csv, docx, doc, xlsx, xls`);
+  throw new Error(`Unsupported file type: .${ext}. Allowed: pdf, txt, csv, docx, doc, xlsx`);
 }

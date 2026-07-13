@@ -1,9 +1,12 @@
 import "dotenv/config";
 
 import { Agent } from '@mastra/core/agent'
+import type { MastraMemory } from '@mastra/core/memory'
 import { Memory } from '@mastra/memory'
 import { getChatModel } from "../core/llm/provider.js";
 import { sharedPgStore } from "../core/db/shared-pg-store.js";
+
+const surveyMemory = new Memory({ storage: sharedPgStore, options: { lastMessages: 10 } }) as unknown as MastraMemory;
 
 export const surveyAgent = new Agent({
   id: 'survey-agent',
@@ -143,5 +146,5 @@ export const surveyAgent = new Agent({
 </examples>
   `,
   model: getChatModel(),
-  memory: new Memory({ storage: sharedPgStore, options: { lastMessages: 10 } }),
+  memory: surveyMemory,
 })

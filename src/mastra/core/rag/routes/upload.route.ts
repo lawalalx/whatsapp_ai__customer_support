@@ -12,7 +12,7 @@ const upload = multer({
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
   fileFilter: (_req, file, cb) => {
     const ext = file.originalname.split(".").pop()?.toLowerCase();
-    const allowed = ["pdf", "txt", "csv", "docx", "doc", "xlsx", "xls"];
+    const allowed = ["pdf", "txt", "csv", "docx", "doc", "xlsx"];
     if (!ext || !allowed.includes(ext)) {
       return cb(new Error(`Unsupported file type: .${ext}. Allowed: ${allowed.join(", ")}`));
     }
@@ -27,7 +27,7 @@ const upload = multer({
  *     summary: Upload one or more documents to the knowledge base
  *     description: |
  *       Upload one or more files **or** supply raw text.
- *       Supported formats: **PDF, TXT, CSV, DOCX, DOC, XLSX, XLS**.
+ *       Supported formats: **PDF, TXT, CSV, DOCX, DOC, XLSX**.
  *       Each document is chunked, embedded, and added to the vector index.
  *       Existing documents are NOT affected — new documents are appended.
  *       
@@ -46,7 +46,7 @@ const upload = multer({
  *                 items:
  *                   type: string
  *                   format: binary
- *                 description: One or more files (PDF, TXT, CSV, DOCX, DOC, XLSX, XLS)
+ *                 description: One or more files (PDF, TXT, CSV, DOCX, DOC, XLSX)
  *               text:
  *                 type: string
  *                 description: Plain text content (alternative to file upload)

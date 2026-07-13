@@ -64,7 +64,7 @@ function isDuplicateInboundMessage(messageId: string): boolean {
 
 
 const app: Application = express();
-app.locals.mastra = mastra;
+app.locals.mastra = mastra as any;
 
 await warmUpEmbeddingModel().catch(console.error);
 
@@ -90,6 +90,12 @@ app.use(cors({
   origin: true, 
   credentials: true,
 }));
+
+// Enforce HTTPS on supported clients to reduce MITM downgrade risk.
+app.use((_req, res, next) => {
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  next();
+});
 
 
 // Knowledge Base routes
@@ -194,7 +200,7 @@ app.post('/api/agent/reset', async (req: Request, res: Response) => {
 });
 
 
-console.log('DB URL from Express Server', process.env.DATABASE_URL);
+console.log('Database connection configuration loaded.');
 
 // Serve Swagger UI at /docs
 const swaggerDocument = {
@@ -2549,7 +2555,7 @@ Supported message types:
     post: {
       summary: 'Upload document(s) to knowledge base',
       tags: ['Knowledge Base'],
-      description: 'Uploads one or more files (PDF, TXT, CSV, DOCX, DOC, XLSX, XLS) or raw text to the knowledge base. Each document is chunked, embedded, and stored in the vector index.',
+      description: 'Uploads one or more files (PDF, TXT, CSV, DOCX, DOC, XLSX) or raw text to the knowledge base. Each document is chunked, embedded, and stored in the vector index.',
       requestBody: {
         required: true,
         content: {
@@ -2557,7 +2563,7 @@ Supported message types:
             schema: {
               type: 'object',
               properties: {
-                files: { type: 'array', items: { type: 'string', format: 'binary' }, description: 'PDF, TXT, CSV, DOCX, DOC, XLSX, or XLS files' },
+                files: { type: 'array', items: { type: 'string', format: 'binary' }, description: 'PDF, TXT, CSV, DOCX, DOC, or XLSX files' },
                 text: { type: 'string', description: 'Raw text to ingest directly' },
                 title: { type: 'string', description: 'Optional document title' }
               }
@@ -2678,8 +2684,13 @@ app.get('/webhook/whatsapp', (req: Request, res: Response) => {
 
   if (mode && token) {
     if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+      const challengeValue = typeof challenge === 'string' ? challenge : '';
+      const isValidChallenge = /^[A-Za-z0-9._-]{1,200}$/.test(challengeValue);
+      if (!isValidChallenge) {
+        return res.sendStatus(400);
+      }
       console.log('WEBHOOK_VERIFIED');
-      return res.status(200).send(challenge);
+      return res.status(200).type('text/plain').send(challengeValue);
     } else {
       return res.sendStatus(403);
     }
@@ -2745,7 +2756,7 @@ app.post('/webhook/whatsapp', async (req: Request, res: Response) => {
     //  Call your router (THIS is the key line)
     await routeIncomingMessage({
       db,
-      mastra,
+      mastra: mastra as any,
       message,
       phone: from,
       contactName,
@@ -4687,7 +4698,7 @@ async function startServer() {
     const httpServer = createServer(app);
     setupRealtimeHub(httpServer);
 
-    const server = new MastraServer({ app: app as any, mastra });
+    const server = new MastraServer({ app: app as any, mastra: mastra as any });
     await server.init();
 
     httpServer.listen(PORT, () => {

@@ -1,7 +1,10 @@
 import { Agent } from '@mastra/core/agent';
+import type { MastraMemory } from '@mastra/core/memory';
 import { Memory } from '@mastra/memory';
 import { weatherTool } from '../tools/weather-tool.js';
 import { scorers } from '../scorers/weather-scorer.js';
+
+const weatherMemory = new Memory() as unknown as MastraMemory;
 
 export const weatherAgent = new Agent({
   id: 'weather-agent',
@@ -45,5 +48,5 @@ export const weatherAgent = new Agent({
       },
     },
   },
-  memory: new Memory(),
+  memory: weatherMemory,
 });
