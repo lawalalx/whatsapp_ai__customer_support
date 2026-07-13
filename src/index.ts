@@ -91,11 +91,11 @@ app.use(cors({
   credentials: true,
 }));
 
-// Enforce HTTPS on supported clients to reduce MITM downgrade risk.
-app.use((_req, res, next) => {
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
-  next();
-});
+// // Enforce HTTPS on supported clients to reduce MITM downgrade risk.
+// app.use((_req, res, next) => {
+//   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+//   next();
+// });
 
 
 // Knowledge Base routes
