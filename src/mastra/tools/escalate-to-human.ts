@@ -89,7 +89,6 @@ export const escalateTool = createTool({
     message: z.string(),
     category: z.enum(['complaint', 'enquiry', 'request']),
     customerPhone: z.string(),
-    userAccountNumber: z.string(),
   }),
 
   outputSchema: z.object({
@@ -110,28 +109,28 @@ export const escalateTool = createTool({
     context?.agent?.threadId?.replace('thread_', '') ||
     input.customerPhone;
 
-    let resolvedAccountNumber = input.userAccountNumber?.trim() || null;
+    // let resolvedAccountNumber = input.userAccountNumber?.trim() || null;
 
-    if (!resolvedAccountNumber) {
-      try {
-        const client = await pool.connect();
-        try {
-          resolvedAccountNumber = await findRecentCollectedAccountNumber(client as any, input.customerPhone);
-        } finally {
-          client.release();
-        }
-      } catch (error) {
-        console.error('Failed to auto-resolve account number from recent secure form submission:', error);
-      }
-    }
+    // if (!resolvedAccountNumber) {
+    //   try {
+    //     const client = await pool.connect();
+    //     try {
+    //       resolvedAccountNumber = await findRecentCollectedAccountNumber(client as any, input.customerPhone);
+    //     } finally {
+    //       client.release();
+    //     }
+    //   } catch (error) {
+    //     console.error('Failed to auto-resolve account number from recent secure form submission:', error);
+    //   }
+    // }
 
-    if (!resolvedAccountNumber) {
-      console.warn('Escalation blocked: missing user account number after secure form lookup.');
-      return {
-        success: false,
-        message: 'Missing account number. Ask the customer to complete the secure form and confirm before escalating.',
-      };
-    }
+    // if (!resolvedAccountNumber) {
+    //   console.warn('Escalation blocked: missing user account number after secure form lookup.');
+    //   return {
+    //     success: false,
+    //     message: 'Missing account number. Ask the customer to complete the secure form and confirm before escalating.',
+    //   };
+    // }
 
     const params = [
       input.message,
@@ -139,7 +138,7 @@ export const escalateTool = createTool({
       'pending',
       ticketId,
       input.customerPhone,
-      resolvedAccountNumber,
+      // resolvedAccountNumber,
       handoffPhone,
       createdAt,
     ];
@@ -152,8 +151,8 @@ export const escalateTool = createTool({
     if (storageDb && typeof storageDb.any === 'function') {
       try {
         await storageDb.any(
-          'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, user_account_number, handoff_phone, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-          params
+          'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, handoff_phone, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+          [input.message, input.category, 'pending', ticketId, input.customerPhone, handoffPhone, createdAt]
         )
         console.log('Ticket created successfully (via Mastra storage)')
         return { success: true, ticketId, createdAt: formatDate(new Date()) }
@@ -173,8 +172,8 @@ export const escalateTool = createTool({
     try {
       client = await pool.connect()
       await client.query(
-        'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, user_account_number, handoff_phone, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-        params
+        'INSERT INTO escalations (message, category, ticket_status, ticket_id, customer_phone, handoff_phone, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [input.message, input.category, 'pending', ticketId, input.customerPhone, handoffPhone, createdAt]
       )
       console.log('Ticket created successfully (via local pool)')
       return { success: true, ticketId, createdAt: formatDate(new Date()) }
