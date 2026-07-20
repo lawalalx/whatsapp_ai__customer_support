@@ -302,28 +302,10 @@ These variables support storage, webhook verification, outbound delivery, and mo
 
 ---
 
-## Why this is a strong portfolio project
-
-This repository is a compelling portfolio project because it shows the ability to build an AI system that goes beyond simple prompting:
-
-- business-facing workflow design
-- channel integration with WhatsApp
-- retrieval-grounded customer support
-- multi-agent orchestration
-- persistence and state management
-- fallback and escalation paths
-- real-world communication constraints and user experience design
-
-For a recruiter, hiring manager, or technical interviewer, this type of project communicates that the builder understands both the AI layer and the operational engineering required to support a production chatbot.
-
----
 
 ## Summary
 
 The FBNBank Ghana/Senegal WhatsApp Intelligence Platform is a practical, polished example of enterprise AI product engineering. It combines messaging automation, conversational intelligence, knowledge retrieval, and human escalation into a single customer-support workflow.
-
-This is the kind of project that signals depth, maturity, and real-world thinking — exactly the qualities that stand out in a technical interview or portfolio review.
-
 ---
 
 ## License
@@ -332,4 +314,6 @@ Repository usage is governed by the project’s current deployment and repositor
 
 ## Contact
 
-For technical review, collaboration, or project discussion, contact the repository owner or maintainer.
+For technical review, collaboration, or project discussion, feel free to reach out at:
+
+- Email: [lawal.alx@gmail.com](mailto:lawal.alx@gmail.com)
