@@ -302,12 +302,6 @@ These variables support storage, webhook verification, outbound delivery, and mo
 
 ---
 
-
-## Summary
-
-The FBNBank Ghana/Senegal WhatsApp Intelligence Platform is a practical, polished example of enterprise AI product engineering. It combines messaging automation, conversational intelligence, knowledge retrieval, and human escalation into a single customer-support workflow.
----
-
 ## License
 
 Repository usage is governed by the project’s current deployment and repository policy. If needed, confirm licensing terms with the repository owner or maintainers.
