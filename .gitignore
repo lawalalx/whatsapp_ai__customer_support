@@ -2,11 +2,13 @@ output.txt
 node_modules 
 node_modules/
 dist/
+
 dist 
 dist/
 .mastra 
 .env.development 
 *.db 
+*.py
 *.db-* 
 .netlify 
 .vercel 
@@ -14,7 +16,6 @@ MYREADME.md
 # .env
 admin-escalation-test.html
 han.ts
-dist.zip
 uploads/
 uploads
 deploy.zip
@@ -23,4 +24,6 @@ META_TEMPLATES.md
 *.docx
 *.pdf
 generate_senegal_docs.py
-*.png
+*.pdf
+
+*.zip
