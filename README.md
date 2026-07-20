@@ -30,19 +30,6 @@ The result is a practical, production-style assistant that improves response qua
 
 ---
 
-## Why this project stands out
-
-What makes this project impressive is the combination of architecture choices and real-world business intent:
-
-- It is not just a chatbot; it is an orchestration layer for messaging operations.
-- It uses retrieval instead of relying only on model memory, which makes answers more grounded.
-- It separates conversation logic, workflow logic, and external integrations cleanly.
-- It incorporates human-in-the-loop escalation for high-stakes banking scenarios.
-- It shows direct enterprise readiness through PostgreSQL persistence, webhook processing, and API-driven deployment patterns.
-
-For interviewers or hiring teams, this is the kind of project that signals system design maturity, practical AI implementation, and strong engineering discipline.
-
----
 
 ## Business problem being solved
 
