@@ -10,7 +10,7 @@
   <strong>Click the preview above to watch the full demo video.</strong>
 </p>
 
-A production-minded WhatsApp customer engagement and survey automation system for FBNBank Ghana/Senegal, built with Mastra, TypeScript, PostgreSQL, and the Meta WhatsApp Business API.
+A production-minded WhatsApp customer engagement and survey automation system for FBNBank Ghana/Senegal, built with TypeScript, PostgreSQL, and the Meta WhatsApp Business API.
 
 This project is a strong example of applied AI in a regulated enterprise environment: it combines agentic conversation, retrieval-augmented generation, multilingual support, workflow automation, and human escalation into one coherent customer service solution.
 
