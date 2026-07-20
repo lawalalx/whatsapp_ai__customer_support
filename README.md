@@ -2,12 +2,12 @@
 
 <p align="center">
   <a href="https://drive.google.com/file/d/1Pm5VX9laf0NBxFQMu83chD8AjeYGXh3B/view?usp=sharing" target="_blank" rel="noopener noreferrer">
-    <img src="https://drive.google.com/uc?export=view&id=1Pm5VX9laf0NBxFQMu83chD8AjeYGXh3B" alt="FBNBank Senegal WhatsApp Intelligence Platform Demo" width="900" />
+    <img src="./demo-preview.gif" alt="FBNBank Senegal WhatsApp Intelligence Platform Demo" width="900" />
   </a>
 </p>
 
 <p align="center">
-  <strong>Click the preview above to watch the demo video.</strong>
+  <strong>Click the preview above to watch the full demo video.</strong>
 </p>
 
 A production-minded WhatsApp customer engagement and survey automation system for FBNBank Senegal, built with Mastra, TypeScript, PostgreSQL, and the Meta WhatsApp Business API.
