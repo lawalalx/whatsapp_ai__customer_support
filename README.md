@@ -1,8 +1,8 @@
-# FBNBank Senegal WhatsApp Intelligence Platform
+# FBNBank Ghana/Senegal WhatsApp Intelligence Platform
 
 <p align="center">
   <a href="https://drive.google.com/file/d/1Pm5VX9laf0NBxFQMu83chD8AjeYGXh3B/view?usp=sharing" target="_blank" rel="noopener noreferrer">
-    <img src="./demo-preview.gif" alt="FBNBank Senegal WhatsApp Intelligence Platform Demo" width="900" />
+    <img src="./demo-preview.gif" alt="FBNBank Ghana/Senegal WhatsApp Intelligence Platform Demo" width="900" />
   </a>
 </p>
 
@@ -10,7 +10,7 @@
   <strong>Click the preview above to watch the full demo video.</strong>
 </p>
 
-A production-minded WhatsApp customer engagement and survey automation system for FBNBank Senegal, built with Mastra, TypeScript, PostgreSQL, and the Meta WhatsApp Business API.
+A production-minded WhatsApp customer engagement and survey automation system for FBNBank Ghana/Senegal, built with Mastra, TypeScript, PostgreSQL, and the Meta WhatsApp Business API.
 
 This project is a strong example of applied AI in a regulated enterprise environment: it combines agentic conversation, retrieval-augmented generation, multilingual support, workflow automation, and human escalation into one coherent customer service solution.
 
@@ -320,7 +320,7 @@ For a recruiter, hiring manager, or technical interviewer, this type of project 
 
 ## Summary
 
-The FBNBank Senegal WhatsApp Intelligence Platform is a practical, polished example of enterprise AI product engineering. It combines messaging automation, conversational intelligence, knowledge retrieval, and human escalation into a single customer-support workflow.
+The FBNBank Ghana/Senegal WhatsApp Intelligence Platform is a practical, polished example of enterprise AI product engineering. It combines messaging automation, conversational intelligence, knowledge retrieval, and human escalation into a single customer-support workflow.
 
 This is the kind of project that signals depth, maturity, and real-world thinking — exactly the qualities that stand out in a technical interview or portfolio review.
 
